@@ -24,703 +24,322 @@ uniform float iBlockOffset;
 uniform float iSampleRate;
 uniform float iVolume;
 
-const bool DEBUG_ONLY_DRUMS = false;
-const bool DEBUG_ONLY_MELO = false;
-const int DEBUG_ONLY_TRACK = -1;
-
-// #define index(it, in) (track_sep[it]+in)
-// int index(int it, float )
-
-//#define PI radians(180.)
-const float PI = acos(-1.);
+#define PI radians(180.)
+float clip(float a) { return clamp(a,-1.,1.); }
+float theta(float x) { return smoothstep(0., 0.01, x); }
 float _sin(float a) { return sin(2. * PI * mod(a,1.)); }
+float _sin(float a, float p) { return sin(2. * PI * mod(a,1.) + p); }
 float _unisin(float a,float b) { return (.5*_sin(a) + .5*_sin((1.+b)*a)); }
 float _sq(float a) { return sign(2.*fract(a) - 1.); }
-float _squ(float a,float pwm) { return sign(2.*fract(a) - 1. + pwm); }
+float _sq(float a,float pwm) { return sign(2.*fract(a) - 1. + pwm); }
+float _psq(float a) { return clip(50.*_sin(a)); }
+float _psq(float a, float pwm) { return clip(50.*(_sin(a) - pwm)); } 
 float _tri(float a) { return (4.*abs(fract(a)-.5) - 1.); }
 float _saw(float a) { return (2.*fract(a) - 1.); }
 float quant(float a,float div,float invdiv) { return floor(div*a+.5)*invdiv; }
 float quanti(float a,float div) { return floor(div*a+.5)/div; }
-float clip(float a) { return clamp(a,-1.,1.); }
-float theta(float x) { return smoothstep(0., 0.01, x); }
-float freqC1(int note){ return 27.5 * pow(2.,float(note+3)/12.); }
+float freqC1(float note){ return 32.7 * pow(2.,note/12.); }
 float minus1hochN(int n) { return (1. - 2.*float(n % 2)); }
 
-const float BPM = 155. * .5;
+#define pat4(a,b,c,d,x) mod(x,1.)<.25 ? a : mod(x,1.)<.5 ? b : mod(x,1.) < .75 ? c : d
+
+const float BPM = 80.;
 const float BPS = BPM/60.;
 const float SPB = 60./BPM;
+
+const float Fsample = 44100.; // I think?
 
 float doubleslope(float t, float a, float d, float s)
 {
     return smoothstep(-.00001,a,t) - (1.-s) * smoothstep(0.,d,t-a);
 }
 
-float TRISQ(float t, float f, int MAXN, float MIX, float INR, float NDECAY, float RES, float RES_Q)
+float s_atan(float a) { return 2./PI * atan(a); }
+float s_crzy(float amp) { return clamp( s_atan(amp) - 0.1*cos(0.9*amp*exp(amp)), -1., 1.); }
+float squarey(float a, float edge) { return abs(a) < edge ? a : floor(4.*a+.5)*.25; } 
+
+float supershape(float s, float amt, float A, float B, float C, float D, float E)
+{
+    float w;
+    float m = sign(s);
+    s = abs(s);
+
+    if(s<A) w = B * smoothstep(0.,A,s);
+    else if(s<C) w = C + (B-C) * smoothstep(C,A,s);
+    else if(s<=D) w = s;
+    else if(s<=1.)
+    {
+        float _s = (s-D)/(1.-D);
+        w = D + (E-D) * (1.5*_s*(1.-.33*_s*_s));
+    }
+    else return 1.;
+    
+    return m*mix(s,w,amt);
+}
+
+float GAC(float t, float offset, float a, float b, float c, float d, float e, float f, float g)
+{
+    t = t - offset;
+    return t<0. ? 0. : a + b*t + c*t*t + d*sin(e*t) + f*exp(-g*t);
+}
+
+float MACESQ(float t, float f, int MAXN, float MIX, float INR, float NDECAY, float RES, float RES_Q, float DET, float PW)
 {
     float ret = 0.;
     
-    for(int N=0; N<=MAXN; N++)
+    int Ninc = 8; // try this: leaving out harmonics...
+    
+    float p = f*t;
+    for(int N=0; N<=MAXN; N+=Ninc)
     {
         float mode     = 2.*float(N) + 1.;
         float inv_mode = 1./mode; 		// avoid division? save table of Nmax <= 20 in some array or whatever
         float comp_TRI = (N % 2 == 1 ? -1. : 1.) * inv_mode*inv_mode;
-        float comp_SQU = inv_mode;
+        float comp_SQU = inv_mode * (1. + (2.*float(N%2)-1.)*_sin(PW)); 
+        float comp_mix = (MIX * comp_TRI + (1.-MIX) * comp_SQU);
+        
+        //one special mode from legacy code 'matzeskuh' - I computed some shitty-but-fun Fourier coefficients for PWM
+        if(MIX < -.01) comp_mix = 1./(2.*PI*float(N)) * (minus1hochN(N)*_sin(PW*float(N)+.25) - 1.);
+
         float filter_N = pow(1. + pow(float(N) * INR,2.*NDECAY),-.5) + RES * exp(-pow(float(N)*INR*RES_Q,2.));
 
-        ret += (MIX * comp_TRI + (1.-MIX) * comp_SQU) * filter_N * _sin(mode * f * t);
+        if(abs(filter_N*comp_mix) < 1e-6) break;
+        
+        ret += comp_mix * filter_N * (_sin(mode * p) + _sin(mode * p * (1.+DET)));
     }
-    
-    return ret;
+    return s_atan(ret);
 }
 
-float QTRISQ(float t, float f, float QUANT, int MAXN, float MIX, float INR, float NDECAY, float RES, float RES_Q)
+float QMACESQ(float t, float f, float QUANT, int MAXN, float MIX, float INR, float NDECAY, float RES, float RES_Q, float DET, float PW)
 {
-    return TRISQ(quant(t,QUANT,1./QUANT), f, MAXN, MIX, INR, NDECAY, RES, RES_Q);
+    return MACESQ(quant(t,QUANT,1./QUANT), f, MAXN, MIX, INR, NDECAY, RES, RES_Q, DET, PW);
 }
 
 float env_ADSR(float x, float L, float A, float D, float S, float R)
 {
+    float att = x/A;
+    float dec = 1. - (1.-S)*(x-A)/D;
+    float rel = (x <= L-R) ? 1. : (L-x)/R;
+    return (x < A ? att : (x < A+D ? dec : S)) * rel;    
+}
+
+// CUDOS TO metabog https://www.shadertoy.com/view/XljSD3 - thanks for letting me steal
+float resolpsomesaw1(float time, float f, float fa, float reso)
+{
+    int maxTaps = 128;
+    fa= sqrt(fa);
+    float c = pow(0.5, (128.0-fa*128.0)   / 16.0);
+  	float r = pow(0.5, (reso*128.0+24.0) / 16.0);
+    
+    float v0 = 0.;
+    float v1 = 0.;
+    
+    for(int i = 0; i < maxTaps; i++)
+    {
+          float _TIME = time - float(maxTaps-i)*(1.0/44100.0);
+          float inp = (2.*fract(f*_TIME+0.)-1.);
+          v0 =  (1.0-r*c)*v0  -  (c)*v1  + (c)*inp;
+  		  v1 =  (1.0-r*c)*v1  +  (c)*v0;
+    }
+    
+    return v1;
+}
+
+
+float env_ADSRexp(float x, float L, float A, float D, float S, float R)
+{
     float att = pow(x/A,8.);
     float dec = S + (1.-S) * exp(-(x-A)/D);
-    float rel = (x < L-R) ? 1. : pow((L-x)/R,4.);
-
-    return (x < A ? att : dec) * rel;
-    
+    float rel = (x <= L-R) ? 1. : pow((L-x)/R,4.);
+    return (x < A ? att : dec) * rel;    
 }
 
-float macesaw(float t, float f, float CO, float Q, float det1, float det2, float res, float resQ)
+//matze: not happy that I include this as is, but we'll just live with it, it is ancient knowledge
+float bitexplosion(float time, float B, int dmaxN, float fvar, float B2amt, float var1, float var2, float var3, float decvar)
 {
-    float s = 0.;
-    float inv_CO = 1./CO;
-    float inv_resQ = 1./resQ;
-    float p = f*t;
-        for(int N=1; N<=200; N++)
-        {
-            // saw
-            float sawcomp = 2./PI * (1. - 2.*float(N % 2)) * 1./float(N);
-            float filterN  = pow(1. + pow(float(N)*f*inv_CO,Q),-.5)
-                     + res * exp(-pow((float(N)*f-CO)*inv_resQ,2.));
-            
-            if(abs(filterN*sawcomp) < 1e-4) break;
-        		
-            if(det1 > 0. || det2 > 0.)
-            {
-                s += 0.33 * (_sin(float(N)*p) + _sin(float(N)*p*(1.+det1)) + _sin(float(N)*p*(1.+det2)));
-            }
-            else
-            {
-                s += filterN * sawcomp * _sin(float(N)*p);
-            }
-        }
-    return s;
+    float snd = 0.;
+    float B2 = mod(B,2.);
+    float f = 60.*fvar;
+	float dt = var1 * 2.*PI/15. * B/sqrt(10.*var2-.5*var3*B);
+    int maxN = 10 + dmaxN;
+    for(int i=0; i<2*maxN+1; i++)
+    {
+        float t = time + float(i - maxN)*dt;
+        snd += _sin(f*t + .5*(1.+B2amt*B2)*_sin(.5*f*t));
+    }
+    float env = exp(-2.*decvar*B);
+    return atan(snd * env);
 }
 
-float maceskuh(float t, float f, float CO, float Q, float det1, float det2, float res, float resQ, float pw)
+float AMAYSYN(float t, float B, float Bon, float Boff, float note, int Bsyn)
 {
-    float s = 0.;
-    float inv_CO = 1./CO;
-    float inv_resQ = 1./resQ;
-    float p = f*t;
-        for(int N=1; N<=200; N++)
-        {
-            // variable pulse wave: voll verrechnet, klingt aber geil =D
-            float plscomp  = 1./float(N) * (1. + (2.*float(N%2)-1.)*_sin(pw)); 
-            float filterN  = pow(1. + pow(float(N)*f*inv_CO,Q),-.5)
-                     + res * exp(-pow((float(N)*f-CO)*inv_resQ,2.));
-            
-            float comp = plscomp * filterN;
-            
-            if(abs(comp) < 1e-6) break;
-        		
-            if(det1 > 0. || det2 > 0.)
-            {
-                s += comp * 0.33 * (_sin(float(N)*p) + _sin(float(N)*p*(1.+det1)) + _sin(float(N)*p*(1.+det2)));
-            }
-            else
-            {
-                s += comp * _sin(float(N)*p);
-            }
-        }
-    return 2.*s-1.;
-}
-
-
-float macesanderekuh(float t, float f, float CO, float Q, float det1, float det2, float res, float resQ, float pw)
-{
-    float s = 0.;
-    float inv_CO = 1./CO;
-    float inv_resQ = 1./resQ;
-    float p = f*t;
-        for(int N=1; N<=200; N++)
-        {
-            // varialbe pulse wave:
-            float plscomp  = 1./(2.*PI*float(N)) * (minus1hochN(N)*_sin(pw*float(N)+.25) - 1.);
-            float filterN  = pow(1. + pow(float(N)*f*inv_CO,Q),-.5)
-                     + res * exp(-pow((float(N)*f-CO)*inv_resQ,2.));
-            
-            float comp = filterN * plscomp;
-            
-            if(abs(comp) < 1e-6) break;
-        		
-            if(det1 > 0. || det2 > 0.)
-            {
-                s += comp * 0.33 * (_sin(float(N)*p) + _sin(float(N)*p*(1.+det1)) + _sin(float(N)*p*(1.+det2)));
-            }
-            else
-            {
-                s += comp * _sin(float(N)*p);
-            }
-        }
-    return 2.*s-1.;
-}
-
-
-float freq_malformation(float t, float t_on, int vel, int Bsyn)
-{
-    t = t - min(t, t_on);
-    
-    float f = 80.;
-    
-    float fFM = 100.;
-    float aFM = 0.01 * doubleslope(t, 0.8, 0.4, 0.5);
-    float aFB = 0.000;
-    
-    float E = doubleslope(t, 0.2, 1., 0.);
-    float r = _sin(t * f * (1. + aFM * _sin(t * fFM * (1. + aFB * _sin(t*fFM)))));
-    return E * r;
-}
-
-float snare(float t, float t_on, int vel, int Bsyn)
-{
-    // #define _tri(a) (4.*abs(fract(a)-.5) - 1.)
-    t = t - min(t, t_on);
-    float f1 = 6000.;
-    float f2 = 800.;
-    float f3 = 350.;
-    float dec12 = 0.01;
-    float dec23 = 0.01;
-    float rel = 0.1;
-    float snr = _tri(t * (f3 + (f1-f2)*smoothstep(-dec12,0.,-t)
-                             + (f2-f3)*smoothstep(-dec12-dec23,-dec12,-t))) * smoothstep(-rel,-dec12-dec23,-t);
-        
-    //noise part
-    float noise = fract(sin(t * 90.) * 45000.) * doubleslope(t,0.05,0.3,0.3);
-    
-    float overdrv = 2.;
-    
-    return float(vel)/100. * clamp(overdrv * snr + noise, -1., 1.) * doubleslope(t,0.0,0.25,0.3);
-}
-
-float hut(float t, float t_on, int vel, int Bsyn)
-{
-    t = t - min(t, t_on);
-    float noise = fract(sin(t * 90.) * 45000.);
-    noise = 1./(1.+noise);
-    return float(vel)/100. * noise * doubleslope(t,0.,0.12,0.0);
-    
-    // might think of this one! - maybe tune length / pitch
-    //float kick_blubb = (1.-exp(-1000.*t))*exp(-30.*t) * _sin((400.-200.*t)*t * _saw(4.*f*t));
-}
-
-float shake(float t, float t_on, int vel, int Bsyn) // shaker is just some mod of hihat (hut)
-{
-    t = t - min(t, t_on);
-    return float(vel)/100. * 0.5 * fract(sin(t * 90.) * 45000.) * doubleslope(t,0.03,0.15,0.15);
-}
-
-float hoskins_noise(float t) // thanks to https://www.shadertoy.com/view/4sjSW1 !
-{
-    float p = floor(t * (1500.0 * exp(-t*.100)));
-	vec2 p2 = fract(vec2(p * 5.3983, p * 5.4427));
-    p2 += dot(p2.yx, p2.xy + vec2(21.5351, 14.3137));
-	return fract(p2.x * p2.y * 3.4337) * .5 * smoothstep(-.3,0.,-t);    
-}
-
-float facekick(float t, float t_on, int vel, int Bsyn)
-{
-    t = t - min(t, t_on); // reset time to Bon event
-    
-    float f   = 50. + 150. * smoothstep(-0.12, 0., -t);
-    float env = smoothstep(0.,0.015,t) * smoothstep(-0.08, 0., 0.16 - t);
-    
-    float kick_body = env * TRISQ(t, f, 3, 1., 0.8, 8., 4., 1.); // more heavy bass drum: increase reso parameters?
-    
-    float kick_click = 0.4 * step(t,0.03) * _sin(t*1100. * _saw(t*800.));
-    
-    float kick_blobb = (1.-exp(-1000.*t))*exp(-40.*t) * _sin((400.-200.*t)*t * _sin(1.*f*t));
-    
-	return float(vel)/100. * (kick_body + kick_blobb + kick_click);
-}
-
-float distsin(float t, float B, float Bon, float Boff, int note, int Bsyn) //Bsyn: select synth. ignore for now.
-{
-    if(note > 100) note = note % 100; // this is for duophony, but my editor doesn't support it
-
-    float Bprog = B-Bon;			// progress within Bar
-    float Bproc = Bprog/(Boff-Bon); // relative progress
-    float _t = SPB*(B - Bon); // reset time to Bon event
+    float Bprog = B-Bon;
+    float Bproc = Bprog/(Boff-Bon);
+    float L = Boff-Bon;
+    float tL = SPB*L;
+    float _t = SPB*(B-Bon);
     float f = freqC1(note);
+	float vel = 1.;
 
     float env = theta(B-Bon) * theta(Boff-B);
-	float sound = clamp(1.1 * _sin(freqC1(note)*t), -0.999,0.999);
+	float s = _sin(t*f);
 
-	if(Bsyn == -1) return 0.; // test reasons: mute
-	
-	if(Bsyn == 0)
-        return env * sound; // test reasons: just give out something simple
-
-    // TEST FRENCH HORN
-//     Bsyn = 15;
-
-    if(Bsyn == 80)
-    {
-        env *= 0.3;
-        
-        sound = macesaw(t, f, 3000., 0.1, 0., 0., 0., 0.); 
-        
-        sound = _saw(t*f);
-    }
-
-    else if(Bsyn == 14) // test of mace-sq (matzeskuh)
-    {
-        env *= env_ADSR(Bprog,Boff-Bon,0.1,1.,1.,0.5);
-        
-//         env *= 0.5;
-        
-        float filterCO = 600. * env_ADSR(Bprog,Boff-Bon,2.,0.,1.,2.) + 40. * sqrt(f);
-
-        sound += 0.3*macesanderekuh(t, f, filterCO, 30., 0.002, -0.01, 0.0, 0.0, 0.1);
-        
-        sound = clip(0.8*sound);
-    }
-
-    else if(Bsyn == 15) // can I manage some horns, some day?
-    {
-        env *= env_ADSR(Bprog,Boff-Bon,.5,0.,0.2,0.);
-        
-        env *= 0.5;
-        
-        float filterCO = 100. * env_ADSR(Bprog,Boff-Bon,2.,0.,1.,0.) + 20. * sqrt(f);
-
-        sound = 0.2*macesaw(t, f, filterCO, 50., -0.01-0.005*_sin(0.5*Bproc), 0.01-0.008*_sin(0.25*Bproc+.25), 0.0, 0.);
-
-        sound += 0.3*maceskuh(t, f, filterCO, 30., 0.002, -0.01, 0.0, 0.0, 0.1+0.06*_sin(0.25*_t));
-
-//        sound += 0.1*maceskuh(t, 2.*f, filterCO, 10., 0.004, -0.002, 0.0, 0.0, -0.1+0.03*_sin(2.*t));
-        
-        sound = clip(0.8*sound);
-    }
+	if(Bsyn == 0){}
+    else if(Bsyn == 1){
+      s = ((s_atan(_sin(.5*f*(t-0.0))+_sin((1.-.01)*.5*f*(t-0.0)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-0.0),_sin(.5*f*(t-0.0)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-0.0)-0.0))
+      +_sin(2.5198*.5*f*((t-0.0)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-0.0)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-0.0)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-3.0e-01))+_sin((1.-.01)*.5*f*(t-3.0e-01)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-3.0e-01),_sin(.5*f*(t-3.0e-01)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-3.0e-01)-0.0))
+      +_sin(2.5198*.5*f*((t-3.0e-01)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-3.0e-01)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-3.0e-01)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-6.0e-01))+_sin((1.-.01)*.5*f*(t-6.0e-01)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-6.0e-01),_sin(.5*f*(t-6.0e-01)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-6.0e-01)-0.0))
+      +_sin(2.5198*.5*f*((t-6.0e-01)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-6.0e-01)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-6.0e-01)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-9.0e-01))+_sin((1.-.01)*.5*f*(t-9.0e-01)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-9.0e-01),_sin(.5*f*(t-9.0e-01)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-9.0e-01)-0.0))
+      +_sin(2.5198*.5*f*((t-9.0e-01)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-9.0e-01)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-9.0e-01)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-1.2))+_sin((1.-.01)*.5*f*(t-1.2)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-1.2),_sin(.5*f*(t-1.2)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-1.2)-0.0))
+      +_sin(2.5198*.5*f*((t-1.2)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-1.2)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-1.2)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-1.5))+_sin((1.-.01)*.5*f*(t-1.5)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-1.5),_sin(.5*f*(t-1.5)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-1.5)-0.0))
+      +_sin(2.5198*.5*f*((t-1.5)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-1.5)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-1.5)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-1.8))+_sin((1.-.01)*.5*f*(t-1.8)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-1.8),_sin(.5*f*(t-1.8)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-1.8)-0.0))
+      +_sin(2.5198*.5*f*((t-1.8)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-1.8)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-1.8)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-2.1))+_sin((1.-.01)*.5*f*(t-2.1)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-2.1),_sin(.5*f*(t-2.1)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-2.1)-0.0))
+      +_sin(2.5198*.5*f*((t-2.1)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-2.1)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-2.1)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-2.4))+_sin((1.-.01)*.5*f*(t-2.4)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-2.4),_sin(.5*f*(t-2.4)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-2.4)-0.0))
+      +_sin(2.5198*.5*f*((t-2.4)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-2.4)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-2.4)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.)))
+      +(s_atan(_sin(.5*f*(t-2.7))+_sin((1.-.01)*.5*f*(t-2.7)))+theta(Bprog)*exp(-.03*Bprog)*.15*_sin(.5*f*(t-2.7),_sin(.5*f*(t-2.7)))+theta(Bprog)*exp(-.03*Bprog)*.8*(_sin(2.5198*.5*f*((t-2.7)-0.0))
+      +_sin(2.5198*.5*f*((t-2.7)-1.0e-02))
+      +_sin(2.5198*.5*f*((t-2.7)-2.0e-02))
+      +_sin(2.5198*.5*f*((t-2.7)-3.0e-02)))*(.7+.5*_tri(.5*Bprog+0.))));}
+    else if(Bsyn == 2){
+      s = _sin(.5*f*t)*env_ADSR(_t,tL,.5,2.,.5,.1);}
+    else if(Bsyn == 3){
+      s = theta(Bprog)*exp(-16.*mod(Bprog,.125))*theta(Bprog)*exp(-1.5*Bprog)*(s_atan((2.*fract(f*t+0.)-1.)+(2.*fract((1.-.01)*f*t+0.)-1.)+(2.*fract((1.-.033)*f*t+0.)-1.)+(2.*fract((1.-.04)*f*t+0.)-1.))+.6*s_atan((2.*fract(.5*f*t+.01)-1.)+(2.*fract((1.-.05)*.5*f*t+.01)-1.)+(2.*fract((1.-0.03)*.5*f*t+.01)-1.)+(2.*fract((1.-0.02)*.5*f*t+.01)-1.)));}
+    else if(Bsyn == 4){
+      s = _sin(f*t)
+      +0.1*GAC(t,0.,1.,2.,0.5,3.,2.,2.,0.25)*_sin(f*t)
+      +.1*GAC(t,0.,1.,2.,0.5,3.,2.,2.,0.25)*supershape(_sin(f*t),1.,.01,.7,.1,.6,.8);}
+    else if(Bsyn == 5){
+      s = resolpsomesaw1(t,f,.5*fract(B),.2);}
+    else if(Bsyn == -1){
+      s = s_atan(vel*(smoothstep(0.,.1,_t)*smoothstep(-(.1+.3),-.1,-_t)*(clip(10.*_tri((81.3+(208.8-81.3)*smoothstep(-.3, 0.,-_t))*t))+_sin(.5*(81.3+(208.8-81.3)*smoothstep(-.3, 0.,-_t))*t)))+ 1.2*step(_t,.05)*_sin(5000.*t*.8*_saw(1000.*t*.8)));}
+    else if(Bsyn == -2){
+      s = vel*fract(sin(t*100.*.9)*50000.*.9)*doubleslope(t,.03,.15,.15);}
+    else if(Bsyn == -3){
+      s = vel*bitexplosion(t, Bprog, 1,1.,1.,1.,1.,1.,1.);}
     
-    else if(Bsyn == 16) // super saw pad
-    {
-        env *= env_ADSR(Bprog,Boff-Bon,1.5,2.,0.2,0.8);
-        
-        env *= 0.5;
-        
-        float filterQ = 100.;
-        float filterCO = 200. + 100. * env_ADSR(Bprog,Boff-Bon,1.5,2.5,0.2,10.);
-
-        sound = 0.9*macesaw(t, f, filterCO, filterQ, 0.010, 0.016, 0.0, 0.);
-       	// t --> quanti(t, 4096); // some nice wicked lo-bit shit
-        
-     
-        sound = 0.4 * (0.5*_saw(t*f+.1+0.1*_sin(2.*t)) + _saw(t*f+.25) + _saw(t*f+0.2*_sin(0.5*t)));
-        // lo-fi noise
-        //sound = quanti(sound, 128.);
-    }
-
-    else if(Bsyn == 88) // TEST WHATEVER IS HERE
-    {
-        env *= env_ADSR(Bprog,Boff-Bon,.1,2.,0.8,0.);
-               
-        float filterQ = 50.;
-        float filterCO = 80. + 250. * env_ADSR(Bprog,Boff-Bon,.2,.3,0.5,0.);
-
-        sound = macesaw(t, f, filterCO, filterQ, 0.010, 0.016, 3., 50.);
-       
-        sound += 0.4*_squ(quanti(t*0.505*f,2048.), 0.1 + 0.05*_sin(.25*Bproc));
-    }
-    
-    else if(Bsyn == 81) // super saw... something. with filter key following
-    {
-        env *= env_ADSR(Bprog,Boff-Bon,.01,.00,1.,0.0);
-        
-        float filterQ = 120.;
-        float filterCO = 900. + 6.*sqrt(f); // + 200. * env_ADSR(Bprog,Boff-Bon,.02,1.,1.,0.003);
-
-//         sound = macesaw(t, f, filterCO, filterQ, 0.010, 0.016, 0.0, 0.);
-       	// t --> quanti(t, 4096); // some nice wicked lo-bit shit
-        
-     // FORGET IT
-        sound = 0.4 * (0.5*_saw(t*f+.1+0.1*_sin(2.*t)) + _saw(t*f+.24+.01*_sin(4.*Bprog)) + _saw(t*f+0.2*_sin(0.5*t)));
-//        sound = 0.4 * (0.5*_saw(t*f+.1+0.1*_sin(2.*t)) + _saw(t*f+.25) + _saw(t*f+0.2*_sin(0.5*t)));
-        // lo-fi noise
-        //sound = quanti(sound, 128.);
-    }
-    
-    
-    else if(Bsyn == 17) // deftiges pad
-    {
-//        env *= env_ADSR(Bprog,Boff-Bon,0.6,0.5,0.9,0.1); // war: 1.5, 2., 0.2, 1. oder so 
-        env *= env_ADSR(Bproc,1.,0.1,0.5,0.9,0.01); // war: 1.5, 2., 0.2, 1. oder so 
-        
-        float filterQ = 20.;
-        float filterCO = 200. + 100. * env_ADSR(Bprog,Boff-Bon,1.5,2.5,0.2,10.);
-       
-        sound = 0.6*macesaw(t, f, filterCO, filterQ, 0.010, 0.020, 0.0, 3.);
-       	// t --> quanti(t, 4096); // some nice wicked lo-bit shit
-        
-        sound += 0.3*macesaw(t, 1.98*f, 1.3*filterCO, filterQ, 0.010, 0.020, 0.00, 1.);
-        
-        // lo-fi noise
-        //sound = quanti(sound, 128.);
-    }
-
-    
-    else if(Bsyn == 10) // Alright, this is not mellow, but wayne.
-    {
-        sound = _tri(2.*f*t) + _tri(0.999*2.*f*_t*(1.+0.0001*_sin(4.*_t)));
-        
-        sound += 0.2 * _saw(5.01*f*t)
-               + 0.2 * _saw(14.01*f*t);
-        
-        sound += _saw(t * (f + 1000. * smoothstep(-0.1,0.,-Bprog))) * smoothstep(-0.1,0.,-Bprog);
-        
-        sound *= 0.2;
-    }
-    
-    else if(Bsyn == 20)
-    {
-        sound = QTRISQ(t, freqC1(note), 1024., 16, 0.2, 8. + 20.*smoothstep(0.,0.3,Bproc), 1.2, 0.2, 0.1)
-              + QTRISQ(t, 2.*freqC1(note), 1024., 16, 0.4, 8. + 20.*smoothstep(0.,0.1,Bproc), 1.2, 0.2, 0.1);
-        
-        sound = 0.8 * sound * exp(-4.0*Bprog);
-
-        sound += 0.4*_sin(_t*f) * exp(-2.0*Bprog);
-        sound += 0.4*_tri(_t*4.*f) * exp(-8.0*Bprog);
-        
-        sound += 0.6 * smoothstep(0.,1.2,Bproc) * (0.5 * _squ(_t*f,0.) + 0.5 * _squ(_t*f*.99,0.01));
-        
-        //sound = clip(1.3*sound);
-    }
-
-    else if(Bsyn == 22)
-    {
-        float kappa = 1.4;
-    	float dist = 1.3;
-
-        env *= exp(-kappa*(B-Bon));
-        
-        float freq_mod = 1. + 0.02 * exp(-10.*(B-Bon)); // edgy sound
-        freq_mod = 1.;
-            
-        //sound = 0.7*sound + 0.3*clamp(2.*dist * _sin(freqC1(note+12)*(t-1e-3)), -0.999,0.999);
-        
-    	sound  = 0.7 * _squ(freq_mod * freqC1(note)*t, -0.4 - 0.15*_sin(0.3*(B-Bon)));
-        
-        // add subbass
-        sound += 0.5 * _unisin(freqC1(note)*t,0.05 * _sin(0.25*t));
-
-        //reduce bit depth to 4
-        //sound = quant(sound, 4., 0.25);
-        
-        // try something else, QTRISQ is my additive low-samplerate osci with improvized filter
-        // QTRISQ(float t, float f, float QUANT, int MAXN, float MIX, float INR, float NDECAY, float RES, float RES_Q)
-        sound = QTRISQ(t, freqC1(note), 1024., 16, 0.2, 8. + 20.*smoothstep(0.,0.3,Bproc), 1.2, 0.2, 0.1)
-              + QTRISQ(t, 2.*freqC1(note), 1024., 16, 0.4, 8. + 20.*smoothstep(0.,0.1,Bproc), 1.2, 0.2, 0.1);
-        
-	    float im = 2. + .5*_sin(0.21*_t);
-        float y = _sin(4.*f*_t + im*_sin(0.25*f*Bproc) );
-        
-    }
-
-    else if(Bsyn == 21)
-    {
-        float kappa = 1.4;
-    	float dist = 1.3;
-
-        env *= exp(-kappa*(B-Bon));
-        
-        float freq_mod = 1. + 0.02 * exp(-10.*(B-Bon)); // edgy sound
-        freq_mod = 1.;
-            
-        //sound = 0.7*sound + 0.3*clamp(2.*dist * _sin(freqC1(note+12)*(t-1e-3)), -0.999,0.999);
-        
-    	sound  = 0.7 * _squ(freq_mod * freqC1(note)*t, -0.4 - 0.15*_sin(0.3*(B-Bon)));
-        
-        // add subbass
-        sound += 0.5 * _unisin(freqC1(note)*t,0.05 * _sin(0.25*t));
-
-        //reduce bit depth to 4
-        //sound = quant(sound, 4., 0.25);
-
-    }
-
-    else if(Bsyn == 13) // inspired by some other shader. forgot which one. sorry.
-    {
-	    float im = 2. + .5*_sin(0.21*_t);
-        float y = _sin(4.*f*_t + im*_sin(0.25*f*Bproc) );
-        
-        sound = y;
-    }
-
-    
-    else if(Bsyn == 4)
-    {
-        env = exp(-6.*Bproc) * (1. + 0.5*_sin(.25+8.*Bproc));
-    
-    	sound = QTRISQ(t, freqC1(note), 2048., 20, 0.2, 3. + 5.*smoothstep(0.,0.3,Bproc), 1.2, 0.2, 0.1)
-              + QTRISQ(t, 2.*freqC1(note), 1024., 10, 0.4, 1. + 3.*smoothstep(0.,0.3,Bproc), 1.2, 0.2, 0.1);
-        
-        sound *= 0.3;
-    }
-    
-    else if(Bsyn == 1)
-    {
-    	float dist = 1.3;
-
-        env = smoothstep(0., 0.25, B-Bon) * (1.+0.01*sin(2.*PI*20.*t)) * theta(Boff-B);
-        
-		sound = 0.3*(clamp(dist * _sin(freqC1(note)*t)           , -0.999,0.999)
-                   + clamp(dist * _sin(0.999*freqC1(note)*t+0.05), -0.999,0.999));
-
-        sound += 0.7 * _unisin(freqC1(note)*t,0.05);    
-    }
-    
-    else if(Bsyn == 31)
-    {
-        env *= exp(-2.7*Bproc);
-        
-        sound = _squ(t*f, 0.1 + 0.02*_sin(4.*Bproc));
-    }
-    
-    else if(Bsyn == 82)
-    {   
-    	float fFM = 0.33*f;
-    	float aFM = 0.3 * doubleslope(_t,1.,5.,0.01);
-		float aFB = 0.02 * doubleslope(_t,2.,8.,0.00);
-    
-        //env = doubleslope(B-Bon, 0.002, 2., 0.);
-    	sound = _sin(_t * f * (1. + aFM * _sin(_t * fFM * (1. + aFB * _sin(_t * fFM)))));
-        
-        //reduce bit depth to 16
-        sound = quant(sound, 16., 0.0625);
-        
-        env *= env_ADSR(Bprog,Boff-Bon,.01,2.,0.8,0.);
-               
-        float filterQ = 50.;
-        float filterCO = 100. + 2.*sqrt(f) + 300. * env_ADSR(Bprog,Boff-Bon,.5,.3,1.,0.005);
-
-        sound += maceskuh(t, f, filterCO, filterQ, -0.010, 0.003, 3., 50., 2.);
-               // rectify
-        //sound = sign(sound);
-
-        // try downsampling
-        //env = doubleslope(B-Bon, 0.01, 8., 0.);
-        //sound = 0.3 * _unisin(quant(_t,256.,0.004) * f * .25, 0.05);
-    
-        // subbass
-        sound += _sin(_t * f * 0.49);
-    }    
-
-        else if(Bsyn == 83)
-    {   
-    	float fFM = 0.33*f;
-    	float aFM = 0.3 * doubleslope(_t,1.,5.,0.01);
-		float aFB = 0.02 * doubleslope(_t,2.,8.,0.00);
-    
-        //env = doubleslope(B-Bon, 0.002, 2., 0.);
-    	sound = _sin(_t * f * (1. + aFM * _sin(_t * fFM * (1. + aFB * _sin(_t * fFM)))));
-        
-        //reduce bit depth to 16
-        sound = quant(sound, 16., 0.0625);
-        
-        env *= env_ADSR(Bprog,Boff-Bon,.01,2.,0.8,0.);
-               
-        float filterQ = 50.;
-        float filterCO = 80. + 250. * env_ADSR(Bprog,Boff-Bon,.5,.3,1.,0.005);
-
-        sound += macesaw(t, f, filterCO, filterQ, 0.010, 0.016, 3., 50.);
-               // rectify
-        //sound = sign(sound);
-
-        // try downsampling
-        //env = doubleslope(B-Bon, 0.01, 8., 0.);
-        //sound = 0.3 * _unisin(quant(_t,256.,0.004) * f * .25, 0.05);
-    
-        // subbass
-        sound += _sin(_t * f * 0.5);
-    }    
-
-    else if(Bsyn == 3)
-    {
-        float kappa = 1.4;
-        env *= exp(-kappa*(B-Bon));
-        sound = _unisin(t*freqC1(note),0.001)
-              + _tri(t*2.*freqC1(note)*(1.+0.0001*_sin(0.5*Bproc))) * smoothstep(0.0,0.3, Bprog);
-
-    	//try some trumpet sound
-        float freq_LFO = 0.005 * smoothstep(0.,1.,_t) * _tri(_t);
-        sound = _saw(_t*freqC1(note)*(1.+freq_LFO) + 0.3 * smoothstep(0.,0.7,_t) * _saw(_t*3.01*freqC1(note)));
-        
-        // now model after DX reface
-        // frequency ratio
-        float FR2 = 0.998;
-        float FR1 = 0.5;
-       	// level
-        float LV2 = 0.5;
-        float LV1 = 1.;
-        // feedback
-        float FB2 = 0.1;
-        float FB1 = 0.6;
-		// actual algorithm (5?)
-        float OP2 = _saw(_t * FR2 * (freqC1(note) + FB2 * _saw(_t * FR2 * freqC1(note))));
-        float OP1 = LV1 * _saw(_t * FR1 * freqC1(note) + LV2 * OP2 + FB1 * _sin(_t * FR1 * freqC1(note)));
-        
-        sound = OP1;
-        
-    }    
-    
-    return clamp(env,0.,1.) * clamp(sound, -1., 1.);
+	return clamp(env,0.,1.) * s_atan(s);
 }
 
-// int note_pitch(int index)
-// {
-//     int ret = 0;
-//     ret *= step(1,index)*(1-step(1,index))*36;
-//     return ret;
-// }
+float BA8(float x, int pattern)
+{
+    x = mod(x,1.);
+    float ret = 0.;
+	for(int b = 0; b < 8; b++)
+    	if ((pattern & (1<<b)) > 0) ret += step(x,float(7-b)/8.);
+    return ret * .125;
+}
 
 float mainSynth(float time)
 {
-int NO_tracks = 9;
-int track_sep[10] = int[10](0,232,241,253,350,375,555,704,979,1036);
-int note_pitch[1036] = int[1036](56,56,55,53,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,41,44,48,49,53,60,55,49,48,49,53,56,60,61,67,73,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,43,36,46,41,43,36,46,39,41,52,53,51,50,52,53,55,56,60,62,63,65,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,72,77,72,71,66,72,70,71,65,61,60,65,60,59,54,72,70,71,65,61,60,65,60,59,54,24,24,24,24,24,24,24,24,24,25,25,25,25,28,28,28,28,24,24,24,24,24,24,24,24,25,25,25,25,20,20,20,24,24,24,24,24,24,24,24,24,25,25,25,25,28,28,28,28,24,24,24,24,24,24,24,24,25,25,25,25,20,20,20,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,24,31,25,13,13,13,16,16,16,16,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,24,31,25,13,13,13,16,16,16,16,17,17,17,17,20,24,31,25,19,24,31,36,29,13,17,20,24,25,29,36,31,25,13,13,13,13,16,16,16,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,24,31,25,13,13,13,16,16,16,16,24,24,24,24,20,20,20,20,27,27,27,27,22,22,17,17,24,24,24,24,20,20,20,20,27,27,27,27,22,22,17,17,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,20,20,13,13,13,13,16,16,16,16,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,20,20,13,13,13,13,16,16,16,16,17,17,17,17,20,20,20,13,19,24,19,24,17,13,17,20,24,25,17,24,19,13,13,13,13,13,16,16,16,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,20,20,13,13,13,13,16,16,16,16,16,6,6,6,6,6,6,6,6,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,8,9,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,8,9,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,8,9,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,7,7,7,7,7,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,7,7,6,7,9,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7);
-float note_on[1036] = float[1036](14.0,14.25,14.5,14.75,15.0,15.25,15.5,15.75,16.0,16.25,16.5,16.75,17.0,17.25,17.5,17.75,18.0,18.25,18.5,18.75,19.0,19.25,19.5,19.75,20.0,20.25,20.5,20.75,21.0,21.25,21.5,21.75,22.0,22.25,22.5,22.75,23.0,23.25,23.5,23.75,24.0,24.25,24.5,24.75,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,27.0,27.25,27.5,27.75,28.0,28.25,28.5,28.75,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,31.0,31.25,31.5,31.75,32.0,32.25,32.5,32.75,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,35.0,35.25,35.5,35.75,36.0,36.25,36.5,36.75,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,39.0,39.25,39.5,39.75,40.0,40.25,40.5,40.75,41.0,41.25,41.5,41.75,42.0,42.25,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.0,46.25,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,49.75,50.0,50.25,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.0,54.25,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.0,58.25,58.5,58.75,59.0,59.25,59.5,59.75,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,65.75,66.0,66.25,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.0,70.25,70.5,70.75,71.0,71.25,71.5,71.75,0.125,2.125,4.125,7.0,8.125,10.125,12.125,14.0,15.0,0.25,3.0,4.0,6.125,8.125,9.0,10.0,11.0,12.0,13.0,14.0,15.0,0.0,0.25,0.375,0.5,0.75,0.875,1.0,1.25,1.375,1.5,1.75,1.875,2.0,2.25,2.375,2.5,2.75,2.875,3.0,3.25,3.375,3.5,3.75,3.875,4.0,4.25,4.375,4.5,4.75,4.875,5.0,5.25,5.375,5.5,5.75,5.875,6.0,6.25,6.375,6.5,6.75,6.875,7.0,7.25,7.375,7.5,7.75,7.875,8.0,8.25,8.375,8.5,8.75,8.875,9.0,9.25,9.375,9.5,9.75,9.875,10.0,10.25,10.375,10.5,10.75,10.875,11.0,11.25,11.375,11.5,11.75,11.875,12.0,12.25,12.375,12.5,12.75,12.875,13.0,13.25,13.375,13.5,13.75,13.875,14.0,14.25,14.375,14.5,14.75,14.875,15.0,15.25,15.375,15.5,15.75,15.875,16.0,16.0,17.5,20.5,22.0,23.0,40.0,41.5,44.5,46.0,47.5,48.0,49.5,52.5,54.0,55.0,56.0,57.5,60.5,62.0,63.5,64.0,65.5,68.5,70.0,71.0,24.0,24.25,24.5,24.75,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,27.0,27.25,27.5,27.75,28.0,28.25,28.5,28.75,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,31.0,31.25,31.5,31.75,32.0,32.25,32.5,32.75,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,35.0,35.25,35.5,35.75,36.0,36.25,36.5,36.75,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,39.0,39.25,39.5,39.75,40.0,40.25,40.5,40.75,41.0,41.25,41.5,42.25,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.25,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,50.25,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.25,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.25,58.5,58.75,59.0,59.25,59.75,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,66.25,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.25,70.5,70.75,71.0,71.25,71.5,71.75,0.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0,7.5,8.0,8.5,9.0,9.5,10.0,10.5,11.0,11.5,12.0,12.5,13.0,13.5,14.0,14.5,15.0,15.5,40.0,40.25,40.5,40.75,41.0,41.25,41.5,42.25,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.25,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,50.25,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.25,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.25,58.5,58.75,59.0,59.25,59.75,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,66.25,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.25,70.5,70.75,71.0,71.25,71.5,71.75,72.0,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0,24.25,24.75,24.875,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,26.875,27.0,27.25,27.75,27.875,28.0,28.25,28.75,28.875,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,30.875,31.0,31.25,31.75,31.875,32.0,32.25,32.75,32.875,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,34.875,35.0,35.25,35.75,35.875,36.0,36.25,36.75,36.875,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,38.875,39.0,39.25,39.375,39.5,39.625,39.75,39.875,40.0,40.125,40.375,40.5,40.625,40.875,41.0,41.125,41.375,41.5,41.625,41.75,42.25,42.375,42.5,42.625,42.75,42.875,43.125,43.25,43.375,43.5,43.625,43.75,43.875,44.0,44.125,44.375,44.5,44.625,44.875,45.0,45.125,45.375,45.5,45.625,45.75,46.0,46.125,46.375,46.5,46.625,46.875,47.0,47.125,47.375,47.5,47.625,47.875,48.0,48.125,48.375,48.5,48.625,48.875,49.0,49.125,49.375,49.5,49.625,49.75,50.25,50.375,50.5,50.625,50.75,50.875,51.125,51.25,51.375,51.5,51.625,51.75,51.875,52.0,52.125,52.375,52.5,52.625,52.875,53.0,53.125,53.375,53.5,53.625,53.75,54.0,54.125,54.375,54.5,54.625,54.875,55.0,55.125,55.375,55.5,55.625,55.875,56.0,56.125,56.375,56.5,56.625,56.875,57.0,57.125,57.375,57.5,57.625,57.75,58.25,58.375,58.5,58.625,58.75,58.875,59.125,59.25,59.375,59.5,59.625,59.75,59.875,60.0,60.125,60.375,60.5,60.625,60.875,61.0,61.125,61.375,61.5,61.625,61.75,62.0,62.125,62.375,62.5,62.625,62.875,63.0,63.125,63.375,63.5,63.625,63.875,64.0,64.125,64.375,64.5,64.625,64.875,65.0,65.125,65.375,65.5,65.625,65.75,66.25,66.375,66.5,66.625,66.75,66.875,67.125,67.25,67.375,67.5,67.625,67.75,67.875,68.0,68.125,68.375,68.5,68.625,68.875,69.0,69.125,69.375,69.5,69.625,69.75,70.0,70.125,70.375,70.5,70.625,70.875,71.0,71.125,71.375,71.5,71.625,71.875,22.0,22.5,22.75,23.0,23.125,23.25,23.375,23.5,23.625,23.75,23.875,40.5,42.875,43.0,43.75,44.5,46.5,47.25,47.375,47.5,47.625,47.75,47.875,48.5,50.875,51.0,51.75,52.5,54.5,55.25,55.375,55.5,55.625,55.75,55.875,56.5,58.875,59.0,59.75,60.5,62.5,63.25,63.375,63.5,63.625,63.75,64.5,66.875,67.0,67.75,68.5,70.5,71.25,71.375,71.5,71.625,71.75);
-float note_off[1036] = float[1036](14.125,14.375,14.625,14.875,15.125,15.375,15.625,15.875,16.125,16.375,16.625,16.875,17.125,17.375,17.625,17.875,18.125,18.375,18.625,18.875,19.125,19.375,19.625,19.875,20.125,20.375,20.625,20.875,21.125,21.375,21.625,21.875,22.125,22.375,22.625,22.875,23.125,23.375,23.625,23.875,24.125,24.375,24.625,24.875,25.125,25.375,25.625,25.875,26.125,26.375,26.625,26.875,27.125,27.375,27.625,27.875,28.125,28.375,28.625,28.875,29.125,29.375,29.625,29.875,30.125,30.375,30.625,30.875,31.125,31.375,31.625,31.875,32.125,32.375,32.625,32.875,33.125,33.375,33.625,33.875,34.125,34.375,34.625,34.875,35.125,35.375,35.625,35.875,36.125,36.375,36.625,36.875,37.125,37.375,37.625,37.875,38.125,38.375,38.625,38.875,39.125,39.375,39.625,39.875,40.125,40.375,40.625,40.875,41.125,41.375,41.625,41.875,42.125,42.375,42.625,42.875,43.125,43.375,43.625,43.875,44.125,44.375,44.625,44.875,45.125,45.375,45.625,45.875,46.125,46.375,46.625,46.875,47.125,47.375,47.625,47.875,48.125,48.375,48.625,48.875,49.125,49.375,49.625,49.875,50.125,50.375,50.625,50.875,51.125,51.375,51.625,51.875,52.125,52.375,52.625,52.875,53.125,53.375,53.625,53.875,54.125,54.375,54.625,54.875,55.125,55.375,55.625,55.875,56.125,56.375,56.625,56.875,57.125,57.375,57.625,57.875,58.125,58.375,58.625,58.875,59.125,59.375,59.625,59.875,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.125,64.375,64.625,64.875,65.125,65.375,65.625,65.875,66.125,66.375,66.625,66.875,67.125,67.375,67.625,67.875,68.125,68.375,68.625,68.875,69.125,69.375,69.625,69.875,70.125,70.375,70.625,70.875,71.125,71.375,71.625,71.875,2.0,4.0,6.0,8.0,10.0,12.0,14.0,15.0,16.0,2.0,4.0,5.875,8.0,9.0,9.75,10.875,12.0,13.0,14.0,15.0,16.0,0.125,0.375,0.5,0.625,0.875,1.0,1.125,1.375,1.5,1.625,1.875,2.0,2.125,2.375,2.5,2.625,2.875,3.0,3.125,3.375,3.5,3.625,3.875,4.0,4.125,4.375,4.5,4.625,4.875,5.0,5.125,5.375,5.5,5.625,5.875,6.0,6.125,6.375,6.5,6.625,6.875,7.0,7.125,7.375,7.5,7.625,7.875,8.0,8.125,8.375,8.5,8.625,8.875,9.0,9.125,9.375,9.5,9.625,9.875,10.0,10.125,10.375,10.5,10.625,10.875,11.0,11.125,11.375,11.5,11.625,11.875,12.0,12.125,12.375,12.5,12.625,12.875,13.0,13.125,13.375,13.5,13.625,13.875,14.0,14.125,14.375,14.5,14.625,14.875,15.0,15.125,15.375,15.5,15.625,15.875,16.0,16.125,17.5,19.5,22.0,23.0,24.0,41.5,43.5,46.0,47.5,48.0,49.5,51.5,54.0,55.0,56.0,57.5,59.5,62.0,63.5,64.0,65.5,67.5,70.0,71.0,72.0,24.25,24.5,24.75,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,27.0,27.25,27.5,27.75,28.0,28.25,28.5,28.75,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,31.0,31.25,31.5,31.75,32.0,32.25,32.5,32.75,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,35.0,35.25,35.5,35.75,36.0,36.25,36.5,36.75,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,39.0,39.25,39.5,39.75,40.0,40.25,40.5,40.75,41.0,41.25,41.5,41.75,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.0,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,49.75,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.0,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.0,58.5,58.75,59.0,59.25,59.5,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,65.75,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.0,70.5,70.75,71.0,71.25,71.5,71.75,72.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0,7.5,8.0,8.5,9.0,9.5,10.0,10.5,11.0,11.5,12.0,12.5,13.0,13.5,14.0,14.5,15.0,15.5,16.0,40.25,40.5,40.75,41.0,41.25,41.5,41.75,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.0,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,49.75,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.0,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.0,58.5,58.75,59.0,59.25,59.5,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,65.75,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.0,70.5,70.75,71.0,71.25,71.5,71.75,72.0,72.25,16.5,17.5,18.5,19.5,20.5,21.5,22.5,23.5,24.25,24.5,24.875,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,26.875,27.0,27.25,27.5,27.875,28.0,28.25,28.5,28.875,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,30.875,31.0,31.25,31.5,31.875,32.0,32.25,32.5,32.875,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,34.875,35.0,35.25,35.5,35.875,36.0,36.25,36.5,36.875,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,38.875,39.0,39.25,39.375,39.5,39.625,39.75,39.875,40.0,40.125,40.25,40.5,40.625,40.75,41.0,41.125,41.25,41.5,41.625,41.75,41.875,42.375,42.5,42.625,42.75,42.875,43.0,43.25,43.375,43.5,43.625,43.75,43.875,44.0,44.125,44.25,44.5,44.625,44.75,45.0,45.125,45.25,45.5,45.625,45.75,45.875,46.125,46.25,46.5,46.625,46.75,47.0,47.125,47.25,47.5,47.625,47.75,48.0,48.125,48.25,48.5,48.625,48.75,49.0,49.125,49.25,49.5,49.625,49.75,49.875,50.375,50.5,50.625,50.75,50.875,51.0,51.25,51.375,51.5,51.625,51.75,51.875,52.0,52.125,52.25,52.5,52.625,52.75,53.0,53.125,53.25,53.5,53.625,53.75,53.875,54.125,54.25,54.5,54.625,54.75,55.0,55.125,55.25,55.5,55.625,55.75,56.0,56.125,56.25,56.5,56.625,56.75,57.0,57.125,57.25,57.5,57.625,57.75,57.875,58.375,58.5,58.625,58.75,58.875,59.0,59.25,59.375,59.5,59.625,59.75,59.875,60.0,60.125,60.25,60.5,60.625,60.75,61.0,61.125,61.25,61.5,61.625,61.75,61.875,62.125,62.25,62.5,62.625,62.75,63.0,63.125,63.25,63.5,63.625,63.75,64.0,64.125,64.25,64.5,64.625,64.75,65.0,65.125,65.25,65.5,65.625,65.75,65.875,66.375,66.5,66.625,66.75,66.875,67.0,67.25,67.375,67.5,67.625,67.75,67.875,68.0,68.125,68.25,68.5,68.625,68.75,69.0,69.125,69.25,69.5,69.625,69.75,69.875,70.125,70.25,70.5,70.625,70.75,71.0,71.125,71.25,71.5,71.625,71.75,72.0,22.25,22.75,23.0,23.125,23.25,23.375,23.5,23.625,23.75,23.875,24.0,40.625,43.0,43.125,43.875,44.625,46.625,47.375,47.5,47.625,47.75,47.875,48.0,48.625,51.0,51.125,51.875,52.625,54.625,55.375,55.5,55.625,55.75,55.875,56.0,56.625,59.0,59.125,59.875,60.625,62.625,63.375,63.5,63.625,63.75,63.875,64.625,67.0,67.125,67.875,68.625,70.625,71.375,71.5,71.625,71.75,71.875);
-
-// int NO_tracks = 9;
-// int track_sep[10] = int[10](0,232,241,253,350,375,555,587,862,919);
-// int note_pitch[919] = int[919](56,56,55,53,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,41,44,48,49,53,60,55,49,48,49,53,56,60,61,67,73,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,56,55,52,44,56,55,60,53,56,56,55,52,44,56,60,55,43,36,46,41,43,36,46,39,41,52,53,51,50,52,53,55,56,60,62,63,65,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,72,77,72,71,66,72,70,71,65,61,60,65,60,59,54,72,70,71,65,61,60,65,60,59,54,24,24,24,24,24,24,24,24,24,25,25,25,25,28,28,28,28,24,24,24,24,24,24,24,24,25,25,25,25,20,20,20,24,24,24,24,24,24,24,24,24,25,25,25,25,28,28,28,28,24,24,24,24,24,24,24,24,25,25,25,25,20,20,20,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,24,31,25,13,13,13,16,16,16,16,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,24,31,25,13,13,13,16,16,16,16,17,17,17,17,20,24,31,25,19,24,31,36,29,13,17,20,24,25,29,36,31,25,13,13,13,13,16,16,16,17,17,17,17,17,17,17,19,19,19,19,13,13,13,17,17,17,17,20,24,31,25,13,13,13,16,16,16,16,24,24,24,24,20,20,20,20,27,27,27,27,22,22,17,17,24,24,24,24,20,20,20,20,27,27,27,27,22,22,17,17,6,6,6,6,6,6,6,6,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,8,9,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,8,9,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,8,9,6,8,8,9,7,6,7,8,6,6,8,8,9,7,8,7,7,7,7,7,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,6,9,6,9,9,6,9,6,9,6,9,6,9,9,6,9,9,6,9,9,6,9,7,6,9,9,6,9,9,6,9,9,6,9,9,7,7,6,7,9,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7);
-// float note_on[919] = float[919](14.0,14.25,14.5,14.75,15.0,15.25,15.5,15.75,16.0,16.25,16.5,16.75,17.0,17.25,17.5,17.75,18.0,18.25,18.5,18.75,19.0,19.25,19.5,19.75,20.0,20.25,20.5,20.75,21.0,21.25,21.5,21.75,22.0,22.25,22.5,22.75,23.0,23.25,23.5,23.75,24.0,24.25,24.5,24.75,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,27.0,27.25,27.5,27.75,28.0,28.25,28.5,28.75,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,31.0,31.25,31.5,31.75,32.0,32.25,32.5,32.75,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,35.0,35.25,35.5,35.75,36.0,36.25,36.5,36.75,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,39.0,39.25,39.5,39.75,40.0,40.25,40.5,40.75,41.0,41.25,41.5,41.75,42.0,42.25,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.0,46.25,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,49.75,50.0,50.25,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.0,54.25,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.0,58.25,58.5,58.75,59.0,59.25,59.5,59.75,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,65.75,66.0,66.25,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.0,70.25,70.5,70.75,71.0,71.25,71.5,71.75,0.125,2.125,4.125,7.0,8.125,10.125,12.125,14.0,15.0,0.25,3.0,4.0,6.125,8.125,9.0,10.0,11.0,12.0,13.0,14.0,15.0,0.0,0.25,0.375,0.5,0.75,0.875,1.0,1.25,1.375,1.5,1.75,1.875,2.0,2.25,2.375,2.5,2.75,2.875,3.0,3.25,3.375,3.5,3.75,3.875,4.0,4.25,4.375,4.5,4.75,4.875,5.0,5.25,5.375,5.5,5.75,5.875,6.0,6.25,6.375,6.5,6.75,6.875,7.0,7.25,7.375,7.5,7.75,7.875,8.0,8.25,8.375,8.5,8.75,8.875,9.0,9.25,9.375,9.5,9.75,9.875,10.0,10.25,10.375,10.5,10.75,10.875,11.0,11.25,11.375,11.5,11.75,11.875,12.0,12.25,12.375,12.5,12.75,12.875,13.0,13.25,13.375,13.5,13.75,13.875,14.0,14.25,14.375,14.5,14.75,14.875,15.0,15.25,15.375,15.5,15.75,15.875,16.0,16.0,17.5,20.5,22.0,23.0,40.0,41.5,44.5,46.0,47.5,48.0,49.5,52.5,54.0,55.0,56.0,57.5,60.5,62.0,63.5,64.0,65.5,68.5,70.0,71.0,24.0,24.25,24.5,24.75,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,27.0,27.25,27.5,27.75,28.0,28.25,28.5,28.75,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,31.0,31.25,31.5,31.75,32.0,32.25,32.5,32.75,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,35.0,35.25,35.5,35.75,36.0,36.25,36.5,36.75,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,39.0,39.25,39.5,39.75,40.0,40.25,40.5,40.75,41.0,41.25,41.5,42.25,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.25,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,50.25,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.25,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.25,58.5,58.75,59.0,59.25,59.75,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,66.25,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.25,70.5,70.75,71.0,71.25,71.5,71.75,0.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0,7.5,8.0,8.5,9.0,9.5,10.0,10.5,11.0,11.5,12.0,12.5,13.0,13.5,14.0,14.5,15.0,15.5,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0,24.25,24.75,24.875,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,26.875,27.0,27.25,27.75,27.875,28.0,28.25,28.75,28.875,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,30.875,31.0,31.25,31.75,31.875,32.0,32.25,32.75,32.875,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,34.875,35.0,35.25,35.75,35.875,36.0,36.25,36.75,36.875,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,38.875,39.0,39.25,39.375,39.5,39.625,39.75,39.875,40.0,40.125,40.375,40.5,40.625,40.875,41.0,41.125,41.375,41.5,41.625,41.75,42.25,42.375,42.5,42.625,42.75,42.875,43.125,43.25,43.375,43.5,43.625,43.75,43.875,44.0,44.125,44.375,44.5,44.625,44.875,45.0,45.125,45.375,45.5,45.625,45.75,46.0,46.125,46.375,46.5,46.625,46.875,47.0,47.125,47.375,47.5,47.625,47.875,48.0,48.125,48.375,48.5,48.625,48.875,49.0,49.125,49.375,49.5,49.625,49.75,50.25,50.375,50.5,50.625,50.75,50.875,51.125,51.25,51.375,51.5,51.625,51.75,51.875,52.0,52.125,52.375,52.5,52.625,52.875,53.0,53.125,53.375,53.5,53.625,53.75,54.0,54.125,54.375,54.5,54.625,54.875,55.0,55.125,55.375,55.5,55.625,55.875,56.0,56.125,56.375,56.5,56.625,56.875,57.0,57.125,57.375,57.5,57.625,57.75,58.25,58.375,58.5,58.625,58.75,58.875,59.125,59.25,59.375,59.5,59.625,59.75,59.875,60.0,60.125,60.375,60.5,60.625,60.875,61.0,61.125,61.375,61.5,61.625,61.75,62.0,62.125,62.375,62.5,62.625,62.875,63.0,63.125,63.375,63.5,63.625,63.875,64.0,64.125,64.375,64.5,64.625,64.875,65.0,65.125,65.375,65.5,65.625,65.75,66.25,66.375,66.5,66.625,66.75,66.875,67.125,67.25,67.375,67.5,67.625,67.75,67.875,68.0,68.125,68.375,68.5,68.625,68.875,69.0,69.125,69.375,69.5,69.625,69.75,70.0,70.125,70.375,70.5,70.625,70.875,71.0,71.125,71.375,71.5,71.625,71.875,22.0,22.5,22.75,23.0,23.125,23.25,23.375,23.5,23.625,23.75,23.875,40.5,42.875,43.0,43.75,44.5,46.5,47.25,47.375,47.5,47.625,47.75,47.875,48.5,50.875,51.0,51.75,52.5,54.5,55.25,55.375,55.5,55.625,55.75,55.875,56.5,58.875,59.0,59.75,60.5,62.5,63.25,63.375,63.5,63.625,63.75,64.5,66.875,67.0,67.75,68.5,70.5,71.25,71.375,71.5,71.625,71.75);
-// float note_off[919] = float[919](14.125,14.375,14.625,14.875,15.125,15.375,15.625,15.875,16.125,16.375,16.625,16.875,17.125,17.375,17.625,17.875,18.125,18.375,18.625,18.875,19.125,19.375,19.625,19.875,20.125,20.375,20.625,20.875,21.125,21.375,21.625,21.875,22.125,22.375,22.625,22.875,23.125,23.375,23.625,23.875,24.125,24.375,24.625,24.875,25.125,25.375,25.625,25.875,26.125,26.375,26.625,26.875,27.125,27.375,27.625,27.875,28.125,28.375,28.625,28.875,29.125,29.375,29.625,29.875,30.125,30.375,30.625,30.875,31.125,31.375,31.625,31.875,32.125,32.375,32.625,32.875,33.125,33.375,33.625,33.875,34.125,34.375,34.625,34.875,35.125,35.375,35.625,35.875,36.125,36.375,36.625,36.875,37.125,37.375,37.625,37.875,38.125,38.375,38.625,38.875,39.125,39.375,39.625,39.875,40.125,40.375,40.625,40.875,41.125,41.375,41.625,41.875,42.125,42.375,42.625,42.875,43.125,43.375,43.625,43.875,44.125,44.375,44.625,44.875,45.125,45.375,45.625,45.875,46.125,46.375,46.625,46.875,47.125,47.375,47.625,47.875,48.125,48.375,48.625,48.875,49.125,49.375,49.625,49.875,50.125,50.375,50.625,50.875,51.125,51.375,51.625,51.875,52.125,52.375,52.625,52.875,53.125,53.375,53.625,53.875,54.125,54.375,54.625,54.875,55.125,55.375,55.625,55.875,56.125,56.375,56.625,56.875,57.125,57.375,57.625,57.875,58.125,58.375,58.625,58.875,59.125,59.375,59.625,59.875,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.25,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.125,64.375,64.625,64.875,65.125,65.375,65.625,65.875,66.125,66.375,66.625,66.875,67.125,67.375,67.625,67.875,68.125,68.375,68.625,68.875,69.125,69.375,69.625,69.875,70.125,70.375,70.625,70.875,71.125,71.375,71.625,71.875,2.0,4.0,6.0,8.0,10.0,12.0,14.0,15.0,16.0,2.0,4.0,5.875,8.0,9.0,9.75,10.875,12.0,13.0,14.0,15.0,16.0,0.125,0.375,0.5,0.625,0.875,1.0,1.125,1.375,1.5,1.625,1.875,2.0,2.125,2.375,2.5,2.625,2.875,3.0,3.125,3.375,3.5,3.625,3.875,4.0,4.125,4.375,4.5,4.625,4.875,5.0,5.125,5.375,5.5,5.625,5.875,6.0,6.125,6.375,6.5,6.625,6.875,7.0,7.125,7.375,7.5,7.625,7.875,8.0,8.125,8.375,8.5,8.625,8.875,9.0,9.125,9.375,9.5,9.625,9.875,10.0,10.125,10.375,10.5,10.625,10.875,11.0,11.125,11.375,11.5,11.625,11.875,12.0,12.125,12.375,12.5,12.625,12.875,13.0,13.125,13.375,13.5,13.625,13.875,14.0,14.125,14.375,14.5,14.625,14.875,15.0,15.125,15.375,15.5,15.625,15.875,16.0,16.125,17.5,19.5,22.0,23.0,24.0,41.5,43.5,46.0,47.5,48.0,49.5,51.5,54.0,55.0,56.0,57.5,59.5,62.0,63.5,64.0,65.5,67.5,70.0,71.0,72.0,24.25,24.5,24.75,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,27.0,27.25,27.5,27.75,28.0,28.25,28.5,28.75,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,31.0,31.25,31.5,31.75,32.0,32.25,32.5,32.75,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,35.0,35.25,35.5,35.75,36.0,36.25,36.5,36.75,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,39.0,39.25,39.5,39.75,40.0,40.25,40.5,40.75,41.0,41.25,41.5,41.75,42.5,42.75,43.0,43.25,43.5,43.75,44.0,44.25,44.5,44.75,45.0,45.25,45.5,45.75,46.0,46.5,46.75,47.0,47.25,47.5,47.75,48.0,48.25,48.5,48.75,49.0,49.25,49.5,49.75,50.5,50.75,51.0,51.25,51.5,51.75,52.0,52.25,52.5,52.75,53.0,53.25,53.5,53.75,54.0,54.5,54.75,55.0,55.25,55.5,55.75,56.0,56.25,56.5,56.75,57.0,57.25,57.5,57.75,58.0,58.5,58.75,59.0,59.25,59.5,60.0,60.25,60.5,60.75,61.0,61.25,61.5,61.75,62.0,62.5,62.75,63.0,63.25,63.5,63.75,64.0,64.25,64.5,64.75,65.0,65.25,65.5,65.75,66.5,66.75,67.0,67.25,67.5,67.75,68.0,68.25,68.5,68.75,69.0,69.25,69.5,69.75,70.0,70.5,70.75,71.0,71.25,71.5,71.75,72.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0,7.5,8.0,8.5,9.0,9.5,10.0,10.5,11.0,11.5,12.0,12.5,13.0,13.5,14.0,14.5,15.0,15.5,16.0,16.5,17.5,18.5,19.5,20.5,21.5,22.5,23.5,24.25,24.5,24.875,25.0,25.25,25.5,25.75,26.0,26.25,26.5,26.75,26.875,27.0,27.25,27.5,27.875,28.0,28.25,28.5,28.875,29.0,29.25,29.5,29.75,30.0,30.25,30.5,30.75,30.875,31.0,31.25,31.5,31.875,32.0,32.25,32.5,32.875,33.0,33.25,33.5,33.75,34.0,34.25,34.5,34.75,34.875,35.0,35.25,35.5,35.875,36.0,36.25,36.5,36.875,37.0,37.25,37.5,37.75,38.0,38.25,38.5,38.75,38.875,39.0,39.25,39.375,39.5,39.625,39.75,39.875,40.0,40.125,40.25,40.5,40.625,40.75,41.0,41.125,41.25,41.5,41.625,41.75,41.875,42.375,42.5,42.625,42.75,42.875,43.0,43.25,43.375,43.5,43.625,43.75,43.875,44.0,44.125,44.25,44.5,44.625,44.75,45.0,45.125,45.25,45.5,45.625,45.75,45.875,46.125,46.25,46.5,46.625,46.75,47.0,47.125,47.25,47.5,47.625,47.75,48.0,48.125,48.25,48.5,48.625,48.75,49.0,49.125,49.25,49.5,49.625,49.75,49.875,50.375,50.5,50.625,50.75,50.875,51.0,51.25,51.375,51.5,51.625,51.75,51.875,52.0,52.125,52.25,52.5,52.625,52.75,53.0,53.125,53.25,53.5,53.625,53.75,53.875,54.125,54.25,54.5,54.625,54.75,55.0,55.125,55.25,55.5,55.625,55.75,56.0,56.125,56.25,56.5,56.625,56.75,57.0,57.125,57.25,57.5,57.625,57.75,57.875,58.375,58.5,58.625,58.75,58.875,59.0,59.25,59.375,59.5,59.625,59.75,59.875,60.0,60.125,60.25,60.5,60.625,60.75,61.0,61.125,61.25,61.5,61.625,61.75,61.875,62.125,62.25,62.5,62.625,62.75,63.0,63.125,63.25,63.5,63.625,63.75,64.0,64.125,64.25,64.5,64.625,64.75,65.0,65.125,65.25,65.5,65.625,65.75,65.875,66.375,66.5,66.625,66.75,66.875,67.0,67.25,67.375,67.5,67.625,67.75,67.875,68.0,68.125,68.25,68.5,68.625,68.75,69.0,69.125,69.25,69.5,69.625,69.75,69.875,70.125,70.25,70.5,70.625,70.75,71.0,71.125,71.25,71.5,71.625,71.75,72.0,22.25,22.75,23.0,23.125,23.25,23.375,23.5,23.625,23.75,23.875,24.0,40.625,43.0,43.125,43.875,44.625,46.625,47.375,47.5,47.625,47.75,47.875,48.0,48.625,51.0,51.125,51.875,52.625,54.625,55.375,55.5,55.625,55.75,55.875,56.0,56.625,59.0,59.125,59.875,60.625,62.625,63.375,63.5,63.625,63.75,63.875,64.625,67.0,67.125,67.875,68.625,70.625,71.375,71.5,71.625,71.75,71.875);
-int track_synth[9] = int[9](4,3,3,9,3,82,20,6,7);
-float track_norm[9] = float[9](1.,.8,.8,1.,1.,1.,1.,1.,1.);
-int track_oct[9] = int[9](0,0,0,0,-1,0,-1,0,0);
-float global_norm = 0.4;
-float max_note_off = 72.0;
-int drum_index_lower = 5;
-int drum_index_upper = 11;
-// Track list:
-//  0  Elektrosäge
-//  1  VintageDreams1
-//  2  VintageDreams2
-//  3  Shakey
-//  4  Mellow Pellow
-//  5  Heavy Bace
-//  6  Middleheavy Bace
-//  7  Schlaggerät
-//  8  Eggsdra Sneeer
-
+    int NO_trks = 1;
+    int trk_sep[2] = int[2](0,1);
+    int trk_syn[1] = int[1](5);
+    float trk_norm[1] = float[1](.9);
+    float trk_rel[1] = float[1](.7);
+    float mod_on[1] = float[1](0.);
+    float mod_off[1] = float[1](8.);
+    int mod_ptn[1] = int[1](0);
+    float mod_transp[1] = float[1](0.);
+    float max_mod_off = 8.;
+    int drum_index = 6;
+    float drum_synths = 1.;
+    int NO_ptns = 1;
+    int ptn_sep[2] = int[2](0,17);
+    float note_on[17] = float[17](0.,1.,1.5,2.,2.5,3.,4.,4.,4.5,4.5,5.,5.5,5.5,6.,6.5,7.,7.5);
+    float note_off[17] = float[17](1.,1.5,2.,2.5,3.,4.,4.5,4.5,5.,5.,5.5,6.,6.,7.,7.,8.,8.);
+    float note_pitch[17] = float[17](31.,35.,33.,36.,33.,27.,50.,35.,33.,49.,36.,39.,45.,28.,40.,24.,39.);
+    float note_vel[17] = float[17](1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.);
+    
+   
     float r = 0.;
     float d = 0.;
-    
-    //which beat are we at?
-    float B = mod(BPS * time, max_note_off); // mod for looping
-    if(B > max_note_off) return r;
 
-    // drum / sidechaining parameters
-    float amt_drum = 0.3;
+    // mod for looping
+    float BT = mod(BPS * time, max_mod_off);
+    if(BT > max_mod_off) return r;
+    time = SPB * BT;
+
     float r_sidechain = 1.;
-    float amt_sidechain = 0.99;
-    float dec_sidechain = 0.6;
-    
-    //defaults (should lead to no sound)
-    float Bon = -1.;
-    float Boff = -1.;
-    int Bpitch = -1;
-    int Bsyn = -1;
-    
-    for(int trk = 0; trk < NO_tracks; trk++)
+
+    float Bon = 0.;
+    float Boff = 0.;
+
+    for(int trk = 0; trk < NO_trks; trk++)
     {
-        if(DEBUG_ONLY_TRACK >=0 && trk != DEBUG_ONLY_TRACK) continue;
+        int TLEN = trk_sep[trk+1] - trk_sep[trk];
+       
+        int _mod = TLEN;
+        for(int i=0; i<TLEN; i++) if(BT < mod_off[(trk_sep[trk]+i)]) {_mod = i; break;}
+        if(_mod == TLEN) continue;
+       
+        float B = BT - mod_on[trk_sep[trk]+_mod];
 
-        if(B < note_on[(track_sep[trk]+0)]) continue;
-        if(B > note_off[(track_sep[trk+1]-1)]) continue;
+        int ptn = mod_ptn[trk_sep[trk]+_mod];
+        int PLEN = ptn_sep[ptn+1] - ptn_sep[ptn];
+       
+        int _noteU = PLEN-1;
+        for(int i=0; i<PLEN-1; i++) if(B < note_on[(ptn_sep[ptn]+i+1)]) {_noteU = i; break;}
 
-        float track0release = 1.;
-
-        int LEN = track_sep[trk+1] - track_sep[trk];
-        
-        int _noteU = LEN-1;
-        for(int i=0; i<LEN-1; i++) if(B < note_on[(track_sep[trk]+i+1)]) {_noteU = i; break;}
-        
-        int _noteL = LEN-1;
-        for(int i=0; i<LEN-1; i++) if(B <= note_off[(track_sep[trk]+i)] + float(i>2)*float(trk==0)*track0release) {_noteL = i; break;}
-        
+        int _noteL = PLEN-1;
+        for(int i=0; i<PLEN-1; i++) if(B <= note_off[(ptn_sep[ptn]+i)] + trk_rel[trk]) {_noteL = i; break;}
+       
         for(int _note = _noteL; _note <= _noteU; _note++)
         {
-            Bon    = note_on[(track_sep[trk]+_note)];
-            Boff   = note_off[(track_sep[trk]+_note)] + float(trk==0)*track0release;
-            Bpitch = note_pitch[(track_sep[trk]+_note)];
-            Bsyn   = track_synth[trk];
+            Bon    = note_on[(ptn_sep[ptn]+_note)];
+            Boff   = note_off[(ptn_sep[ptn]+_note)];
 
-            if (Bsyn < drum_index_lower || Bsyn > drum_index_upper)
+            float anticlick = 1.-exp(-1000.*(B-Bon)); //multiply this elsewhere?
+
+            if(trk_syn[trk] == drum_index)
             {
-                r += track_norm[trk] * distsin(time, B, Bon, Boff, Bpitch + 12*track_oct[trk], Bsyn);
+                int Bdrum = int(mod(note_pitch[ptn_sep[ptn]+_note], drum_synths));
+                float Bvel = note_vel[(ptn_sep[ptn]+_note)] * pow(2.,mod_transp[_mod]/6.);
+
+                float d = 0.;
+
+                if(Bdrum == 0) // Sidechain - have to multiply, actually?
+                {
+                    r_sidechain = anticlick - .999 * theta(B-Bon) * smoothstep(Boff,Bon,B);
+                }
+                else d += trk_norm[trk] * AMAYSYN(time, B, Bon, Boff, Bvel, -Bdrum);
             }
-            else // drums
+            else
             {
-//                 continue; // disable drums, debug
-                Bsyn = Bpitch;
-                float _d = 0.;
-                float anticlick = 1.-exp(-1000.*(B-Bon));
-                if(Bsyn == 6)
-                {
-//                     case 6: // KICK (WITH SIDECHAIN)
-                    _d = facekick(B*SPB, Bon*SPB, 80, Bsyn) * theta(Boff-B);
-                    r_sidechain = anticlick - amt_sidechain * theta(B-Bon) * smoothstep(-dec_sidechain,0.,Bon-B);
-                }
-                else if(Bsyn == 5)
-                {
-//                     case 5: // SIDECHAIN ONLY
-                        r_sidechain = anticlick - amt_sidechain * theta(B-Bon) * smoothstep(-dec_sidechain,0.,Bon-B);
-                }
-                else if(Bsyn == 7)
-                {
-//                     case 7: // SNARE
-                        _d = snare(B*SPB, Bon*SPB, 100, Bsyn);
-                }
-                else if(Bsyn == 8)
-                {
-//                     case 8: // HIHAT
-                        _d = hut(B*SPB, Bon*SPB, 100, Bsyn);
-                }
-                else if(Bsyn == 9)
-                {
-//                     case 9: // SHAKE
-                        _d = shake(B*SPB, Bon*SPB, 100, Bsyn);
-                }
-                
-                d += track_norm[trk] * _d;
+                r += trk_norm[trk] * AMAYSYN(time, B, Bon, Boff,
+                                               note_pitch[(ptn_sep[ptn]+_note)] + mod_transp[_mod], trk_syn[trk]);
             }
+
         }
     }
 
-    d *= global_norm;
-    r *= global_norm;    
-
-    if(DEBUG_ONLY_DRUMS) return 0.99 * clamp(d, -1., 1.);
-    if(DEBUG_ONLY_MELO) return 0.99 * clamp(r, -1., 1.);
-
-    r_sidechain = 1.;
-    amt_drum = .5;
-    
-    float snd = clamp(mix(r_sidechain * r, d, amt_drum), -1.,1.);
-    //float snd = clamp((1.-amt_drum) * r_sidechain * r + amt_drum * d, -1., 1.);
-  
-    return snd;
-//    return sign(snd) * sqrt(abs(snd));
+    return s_atan(s_atan(r_sidechain * r + d));
+//    return sign(snd) * sqrt(abs(snd)); // eine von Matzes "besseren" Ideen
 }
 
 vec2 mainSound(float t)
@@ -728,13 +347,15 @@ vec2 mainSound(float t)
     //maybe this works in enhancing the stereo feel
     float stereo_width = 0.1;
     float stereo_delay = 0.00001;
-    
-//     float comp_l = mainSynth(t) + stereo_width * mainSynth(t - stereo_delay);
-//     float comp_r = mainSynth(t) + stereo_width * mainSynth(t + stereo_delay);
-    
-//     return vec2(comp_l * .99999, comp_r * .99999); 
-    return vec2(tanh(mainSynth(t)));
+   
+    //float comp_l = mainSynth(t) + stereo_width * mainSynth(t - stereo_delay);
+    //float comp_r = mainSynth(t) + stereo_width * mainSynth(t + stereo_delay);
+   
+    //return vec2(comp_l * .99999, comp_r * .99999);
+   
+    return vec2(mainSynth(t));
 }
+
 
 void main() 
 {

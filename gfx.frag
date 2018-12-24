@@ -15,10 +15,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#version 130
+ 
 uniform float iNBeats;
 uniform float iScale;
 uniform float iTime;
 uniform vec2 iResolution;
+uniform sampler2D iFont;
+uniform float iFontWidth;
 
 // Global constants
 const vec3 c = vec3(1.,0.,-1.);
@@ -368,7 +372,7 @@ float zextrude(float z, float d2d, float h)
     return min(max(d.x,d.y),0.)+length(max(d,0.));
 }
 
-/*
+
 // Read short value from texture at index off
 float rshort(float off)
 {
@@ -557,7 +561,7 @@ float dglyphpts(vec2 x, int ascii)
     
     return d;
 }
-*/
+
 
 // Two-dimensional rotation matrix
 mat2 rot(float t)
@@ -967,6 +971,6 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
 
 void main()
 {
-    mainImage(gl_FragColor, gl_FragCoord);
+    mainImage(gl_FragColor, gl_FragCoord.xy);
 }
 
