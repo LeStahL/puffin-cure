@@ -1,4 +1,4 @@
-/* Puffin Cure by Team210 - 64k Demo at Under Construction 2k18
+/* Puffin Cure by Team210 - 64k Demo at Under Construction 2018
  * Copyright (C) 2018  Alexander Kraus <nr4@z10.info>
  *
  * This program is free software: you can redistribute it and/or modify
@@ -15,15 +15,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#version 130
-
-// Uniforms
-uniform float iTime;
-uniform vec2 iResolution;
-uniform sampler2D iFont;
-uniform float iFontWidth;
 uniform float iNBeats;
 uniform float iScale;
+uniform float iTime;
+uniform vec2 iResolution;
 
 // Global constants
 const vec3 c = vec3(1.,0.,-1.);
@@ -57,50 +52,6 @@ mat3 rot(vec3 p)
     return mat3(c.xyyy, cos(p.x), sin(p.x), 0., -sin(p.x), cos(p.x))
         *mat3(cos(p.y), 0., -sin(p.y), c.yxy, sin(p.y), 0., cos(p.y))
         *mat3(cos(p.z), -sin(p.z), 0., sin(p.z), cos(p.z), c.yyyx);
-}
-
-/* compute voronoi distance and closest point.
- * x: coordinate
- * return value: vec3(distance, coordinate of control point)
- */
-vec4 vor(vec3 x)
-{
-    vec3 y = floor(x);
-   	float ret = 10.;
-    
-    //find closest control point. ("In which cell am I?")
-    vec3 pf=c.yyy, p;
-    float df=100., d;
-    
-    for(int i=-1; i<=1; i+=1)
-        for(int j=-1; j<=1; j+=1)
-            for(int k=-1; k<=1; k+=1)
-            {
-                p = y + vec3(float(i), float(j), float(k));
-                p += rand3(p);
-
-                d = length(x-p);
-				
-                if(d < df)
-                {
-                    df = d;
-                    pf = p;
-                }
-            }
-    
-    //compute voronoi distance: minimum distance to any edge
-    for(int i=-1; i<=1; i+=1)
-        for(int j=-1; j<=1; j+=1)
-            for(int k=-1; k<=1; k+=1)
-            {
-                p = y + vec3(float(i), float(j), float(k));
-                p += rand3(p);
-
-                vec3 o = p - pf;
-                d = abs(.5-dot(x-pf, o)/length(o));
-                ret = min(ret, d);
-            }
-    return vec4(ret, pf);
 }
 
 /* compute voronoi distance and closest point.
@@ -146,59 +97,82 @@ vec3 vor(vec2 x)
     return vec3(ret, pf);
 }
 
-// 2D value noise
-float valuenoise(vec2 x)
-{
-    vec2 y = floor(x);
-    x = fract(x);
-    float r00 = -1.+2.*rand(y),
-        r10 = -1.+2.*rand(y+c.xy),
-        r01 = -1.+2.*rand(y+c.yx),
-        r11 = -1.+2.*rand(y+c.xx);
-    return mix(
-        mix(r00, r10, x.x),
-        mix(r01, r11, x.x),
-        x.y
-    );
+vec3 taylorInvSqrt(vec3 r) 
+{     
+    return 1.79284291400159-0.85373472095314*r; 
 }
 
-// 3D value noise
-float valuenoise(vec3 x)
+vec3 permute(vec3 x)
 {
-    vec3 y = floor(x);
-    x = fract(x);
-    float r000 = -1.+2.*rand(y),
-        r100 = -1.+2.*rand(y+c.xyy),
-        r010 = -1.+2.*rand(y+c.yxy),
-        r001 = -1.+2.*rand(y+c.yyx),
-        r110 = -1.+2.*rand(y+c.xxy),
-        r011 = -1.+2.*rand(y+c.yxx),
-        r101 = -1.+2.*rand(y+c.xyx),
-        r111 = -1.+2.*rand(y+c.xxx);
-    return 	mix(
-        		mix(
-            		mix(r000, r100, smoothstep(0.,1.,x.x)),
-                    mix(r010, r110, smoothstep(0.,1.,x.x)),
-                    smoothstep(0.,1.,x.y)
-                ),
-        		mix(
-                    mix(r001, r101, smoothstep(0.,1.,x.x)),
-                    mix(r011, r111, smoothstep(0.,1.,x.x)),
-                    smoothstep(0.,1.,x.y)
-                ),
-        		smoothstep(0.,1.,x.z));
-        
+    return mod((x*34.+1.)*x, 289.);
 }
 
-// Multi-frequency value noise
-float mfvaluenoise(vec2 x, float f0, float f1, float phi)
+/* Simplex noise -
+Copyright (C) 2011 by Ashima Arts (Simplex noise)
+Copyright (C) 2011-2016 by Stefan Gustavson (Classic noise and others)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+float snoise(vec2 P) 
+{     
+    const vec2 C = vec2 (0.211324865405187134, 0.366025403784438597);  
+    vec2 i = floor(P+dot(P, C.yy)) ; 
+    vec2 x0 = P-i+dot(i, C.xx) ; 
+    // Other  corners 
+    vec2 i1 ; 
+    i1.x = step ( x0.y , x0.x ) ;  //  1.0  i f  x0 . x > x0 . y ,  e l s e  0.0 
+    i1.y = 1.0 - i1.x ; 
+    // x1 = x0 − i1 + 1.0 ∗ C. xx ;  x2 = x0 − 1.0 + 2.0 ∗ C. xx ; 
+    vec4 x12 = x0.xyxy + vec4 ( C.xx , C.xx * 2.0 - 1.0) ; 
+    x12.xy -= i1 ; 
+    //  Permutations 
+    i = mod( i ,  289.0) ;  // Avoid  truncation  in  polynomial  evaluation 
+    vec3 p = permute ( permute ( i.y + vec3 (0.0 , i1.y ,  1.0  ) ) + i.x + vec3 (0.0 , i1.x ,  1.0  ) ) ; 
+    //  Circularly  symmetric  blending  kernel
+    vec3 m = max(0.5 - vec3 ( dot ( x0 , x0 ) ,  dot ( x12.xy , x12.xy ) , dot ( x12.zw , x12.zw ) ) ,  0.0) ; 
+    m = m * m ; 
+    m = m * m ; 
+    //  Gradients  from 41  points  on a  line ,  mapped onto a diamond 
+    vec3 x = fract ( p * (1.0  /  41.0) ) * 2.0 - 1.0  ; 
+    vec3 gy = abs ( x ) - 0.5  ; 
+    vec3 ox = floor ( x + 0.5) ;  // round (x)  i s  a GLSL 1.30  feature 
+    vec3 gx = x - ox ; //  Normalise  gradients  i m p l i c i t l y  by  s c a l i n g m 
+    m *= taylorInvSqrt ( gx * gx + gy * gy ) ; // Compute  f i n a l  noise  value  at P 
+    vec3 g ; 
+    g.x = gx.x * x0.x + gy.x * x0.y ; 
+    g.yz = gx.yz * x12.xz + gy.yz * x12.yw ; 
+    //  Scale  output  to  span  range  [ − 1 ,1] 
+    //  ( s c a l i n g  f a c t o r  determined by  experiments ) 
+    return  -1.+2.*(130.0 * dot ( m , g ) ) ; 
+}
+
+// TODO: 3D simplex noise
+
+// Multi-frequency simplex noise
+float mfsnoise(vec2 x, float f0, float f1, float phi)
 {
     float sum = 0.;
     float a = 1.2;
     
     for(float f = f0; f<f1; f = f*2.)
     {
-        sum = a*valuenoise(f*x) + sum;
+        sum = a*snoise(f*x) + sum;
         a = a*phi;
     }
     
@@ -242,6 +216,12 @@ float lineseg(vec2 x, vec2 p1, vec2 p2)
     return length(x-mix(p1, p2, clamp(dot(x-p1, d)/dot(d,d),0.,1.)));
 }
 
+float lineseg(vec3 x, vec3 p1, vec3 p2)
+{
+    vec3 d = p2-p1;
+    return length(x-mix(p1, p2, clamp(dot(x-p1, d)/dot(d,d),0.,1.)));
+}
+
 // distance to spiral
 float dspiral(vec2 x, float a, float d)
 {
@@ -249,6 +229,14 @@ float dspiral(vec2 x, float a, float d)
         n = floor((abs(length(x)-a*p)+d*p)/(2.*pi*a));
     p += (n*2.+1.)*pi;
     return -abs(length(x)-a*p)+d*p;
+}
+
+// distance to gear
+float dgear(vec2 x, vec2 r, float n)
+{
+    float p = atan(x.y,x.x);
+    p = mod(p, 2.*pi/n)*n/2./pi;
+    return mix(length(x)-r.x, length(x)-r.y, step(p,.5));
 }
 
 // Distance to circle
@@ -281,14 +269,20 @@ float stroke(float d, float w)
 }
 
 //distance to quadratic bezier spline with parameter t
+//#define
 float dist(vec2 p0,vec2 p1,vec2 p2,vec2 x,float t)
+{
+    t = clamp(t, 0., 1.);
+    return length(x-pow(1.-t,2.)*p0-2.*(1.-t)*t*p1-t*t*p2);
+}
+float dist(vec3 p0,vec3 p1,vec3 p2,vec3 x,float t)
 {
     t = clamp(t, 0., 1.);
     return length(x-pow(1.-t,2.)*p0-2.*(1.-t)*t*p1-t*t*p2);
 }
 
 // length function, credits go to IQ / rgba; https://www.shadertoy.com/view/MdyfWc
-float length2( in vec2 v  ) { return dot(v,v); }
+#define length23(v) dot(v,v)
 
 //minimum distance to quadratic bezier spline
 float spline2(vec2 p0, vec2 p1, vec2 p2, vec2 x)
@@ -298,7 +292,7 @@ float spline2(vec2 p0, vec2 p1, vec2 p2, vec2 x)
     vec2 bma = max(p0,max(p1,p2));
     vec2 bce = (bmi+bma)*0.5;
     vec2 bra = (bma-bmi)*0.5;
-    float bdi = length2(max(abs(x-bce)-bra,0.0));
+    float bdi = length23(max(abs(x-bce)-bra,0.0));
     if( bdi>dmin )
         return dmin;
         
@@ -328,6 +322,45 @@ float spline2(vec2 p0, vec2 p1, vec2 p2, vec2 x)
     );
 }
 
+//minimum distance to quadratic bezier spline
+float spline2(vec3 p0, vec3 p1, vec3 p2, vec3 x)
+{
+    // check bbox, credits go to IQ / rgba; https://www.shadertoy.com/view/MdyfWc
+	vec3 bmi = min(p0,min(p1,p2));
+    vec3 bma = max(p0,max(p1,p2));
+    vec3 bce = (bmi+bma)*0.5;
+    vec3 bra = (bma-bmi)*0.5;
+    float bdi = length23(max(abs(x-bce)-bra,0.0));
+    if( bdi>dmin )
+        return dmin;
+        
+    //coefficients for 0 = t^3 + a * t^2 + b * t + c
+    vec3 E = x-p0, F = p2-2.*p1+p0, G = p1-p0;
+    vec3 ai = vec3(3.*dot(G,F), 2.*dot(G,G)-dot(E,F), -dot(E,G))/dot(F,F);
+
+	//discriminant and helpers
+    float tau = ai.x/3., p = ai.y-tau*ai.x, q = - tau*(tau*tau+p)+ai.z, dis = q*q/4.+p*p*p/27.;
+    
+    //triple real root
+    if(dis > 0.) 
+    {
+        vec2 ki = -.5*q*c.xx+sqrt(dis)*c.xz, ui = sign(ki)*pow(abs(ki), c.xx/3.);
+        return dist(p0,p1,p2,x,ui.x+ui.y-tau);
+    }
+    
+    //three distinct real roots
+    float fac = sqrt(-4./3.*p), arg = acos(-.5*q*sqrt(-27./p/p/p))/3.;
+    vec3 t = c.zxz*fac*cos(arg*c.xxx+c*pi/3.)-tau;
+    return min(
+        dist(p0,p1,p2,x, t.x),
+        min(
+            dist(p0,p1,p2,x,t.y),
+            dist(p0,p1,p2,x,t.z)
+        )
+    );
+}
+
+
 // extrusion
 float zextrude(float z, float d2d, float h)
 {
@@ -335,6 +368,7 @@ float zextrude(float z, float d2d, float h)
     return min(max(d.x,d.y),0.)+length(max(d,0.));
 }
 
+/*
 // Read short value from texture at index off
 float rshort(float off)
 {
@@ -523,6 +557,7 @@ float dglyphpts(vec2 x, int ascii)
     
     return d;
 }
+*/
 
 // Two-dimensional rotation matrix
 mat2 rot(float t)
@@ -536,9 +571,143 @@ float blend(float tstart, float tend, float dt)
     return smoothstep(tstart-dt, tstart + dt, iTime)*(1.-smoothstep(tend-dt, tend+dt, iTime));
 }
 
-vec3 ind;
-vec2 scene(vec3 x) // Vortex scene
+float softmin( float a, float b, float k )
 {
+    float h = clamp( 0.5+0.5*(b-a)/k, 0.0, 1.0 );
+    return mix( b, a, h ) - k*h*(1.0-h);
+}
+
+float softabs(float x, float a)
+{
+    return -softmin(x,-x,a);
+}
+
+vec2 softabs(vec2 x, float a)
+{
+	return -vec2(softmin(x.x,-x.x,a), softmin(x.y,-x.y,a));
+}
+
+float dtetrahedron(vec3 x, float a, float w)
+{
+    return abs(softmin(
+        lineseg(vec3(softabs(x.x, .5*a),x.yz), c.yyy, a*vec3(1.,0.,-1./sqrt(2.))),
+        lineseg(vec3(x.x,softabs(x.y, .5*a),x.z), c.yyy, a*vec3(0.,1.,1./sqrt(2.))),
+        .5*a
+        ))-w;
+}
+
+float dicosahedron(vec3 x, float a, float w)
+{
+    mat3 r = rot(.3*sin(vec3(1.1,2.2,3.3)*iTime+.5*pi));
+    float phi = .5*(1.+sqrt(5.)),
+        d = softmin(
+            	//lineseg(vec3(x.x, softabs(x.yz,.5*a)), c.yyy, a*vec3(0., 1., phi)),
+            	spline2(c.yyy, .5*a*vec3(0., 1., phi), a*r*vec3(0., 1., phi), vec3(x.x, softabs(x.yz,.5*a))),
+            	//lineseg(vec3(softabs(x.x, .5*a), x.y, softabs(x.z,.5*a)), c.yyy, a*vec3(phi, 0., 1.)),
+            	spline2(c.yyy, .5*a*vec3(phi, 0., 1.), a*r*vec3(phi, 0., 1.), vec3(softabs(x.x, .5*a), x.y, softabs(x.z,.5*a))),
+            	.5*a
+         	);
+    //d = softmin(d, lineseg(vec3(softabs(x.xy, .5*a), x.z), c.yyy, a*vec3(1., phi, 0.)), .5*a);
+    d = softmin(d, spline2(c.yyy, .5*a*vec3(1., phi, 0.), r*a*vec3(1., phi, 0.), vec3(softabs(x.xy, .5*a), x.z)), .5*a);
+    return abs(d)-w;
+}
+
+vec2 talien(vec3 x, float a)
+{
+    vec3 dt = .01*vec3(sin(iTime), cos(iTime), sin(iTime));
+    float dr = .3*a;
+//    vec2 sdf = vec2(dtetrahedron(x,.2,.04), 1.);
+    vec2 sdf = vec2(dicosahedron(x, .2, .04), 1.);
+    vec3 y = mod(x, dr)-.5*dr, 
+        ind = (x-y);
+    //float da = dtetrahedron(ind, .2, .04);
+    float da = dicosahedron(ind, .2, .04);
+    if(abs(da)-.025 < 0.)
+	    sdf = add(sdf, vec2(length(y)-(.05+.1*rand(ind))*a, 3.));
+
+    // Guards
+	float guard = -length(max(abs(y)-vec3(.5*dr*c.xx, .6),0.));
+    guard = abs(guard)+dr*.1;
+    sdf.x = min(sdf.x, guard);
+    
+    return sdf;
+}
+
+vec3 ind;
+vec2 scene(vec3 x) // Moon Scene
+{
+    vec2 sdf = c.xy;
+    x *= rot(vec3(1.1,2.2,3.3)*iTime);
+    sdf = add(sdf,talien(x, .2));
+
+    //vec2 sdf = talien(x, .2);
+    
+    //for(int i=0; i<4; ++i)
+    {
+//    	sdf = add(sdf, vec2(dtetrahedron(x,.2,.04), 1.));
+    }
+    
+    /*
+    float dr = 4.;
+    vec3 y = x;
+    x = mod(x, dr);
+    
+    float scale = clamp(smoothstep(0.,5., iTime-x.z),0.,1.);
+    
+    vec3 dt = .01*vec3(sin(iTime), cos(iTime), sin(iTime));
+    // Tree
+    // Main branch
+    float d = abs(lineseg(x, c.yxy, c.yxx))-.2;
+    d = softmin(d, abs(lineseg(x, c.yxx, vec3(.3,1.3,1.3)-dt))-.1, .1);
+	d = softmin(d, abs(lineseg(x, c.yxx, vec3(-.3,.7,1.3)-dt))-.1, .1);
+	d = softmin(d, abs(lineseg(x, c.yxx, vec3(.5,.7,1.)+dt))-.08, .1);
+
+    // First small branch
+	d = softmin(d, abs(lineseg(x, vec3(.3,1.3,1.3), vec3(.2,1.5,1.5)-dt))-.05, .1);
+    d = softmin(d, abs(lineseg(x, vec3(.3,1.3,1.3), vec3(.7,1.5,1.5)-dt))-.05, .1);
+    
+    // Second small branch
+	d = softmin(d, abs(lineseg(x, vec3(.5,.7,1.)+dt, vec3(.6,.5,1.2)-dt))-.04, .1);
+	d = softmin(d, abs(lineseg(x, vec3(.5,.7,1.)+dt, vec3(.6,.9,1.2)-dt))-.04, .1);
+    
+    //d += .01*snoise(2.*(x.xy+x.yz+x.zx+2.*x.x)-iTime);
+    
+    vec2 sdf = vec2(d, 1.);
+
+    sdf = add(sdf, vec2(length(x-vec3(0.,.8,1.)-dt)-.1, 3.));
+    sdf = add(sdf, vec2(length(x-vec3(.1,.9,.7)-dt)-.1, 3.));
+    sdf = add(sdf, vec2(length(x-vec3(-.1,.9,.8)-dt)-.08, 3.));
+    
+    sdf = add(sdf, vec2(length(x-vec3(.3,.8,1.05)+dt)-.05, 3.));
+    sdf = add(sdf, vec2(length(x-vec3(.5,.7,.95)-dt)-.1, 3.));
+    
+    sdf = add(sdf, vec2(length(x-vec3(.1,1.1,1.2)+dt)-.07, 3.));
+    
+    sdf.x -= -1.+scale;
+    */
+    /*
+    x += iTime*c.yxy-.05*x.y;
+    
+    float dr = .3;
+    vec3 y = mod(x, dr)-.5*dr;
+    float tlo = clamp(mfsnoise(x.xy, 1.e-1, 5.e-1, .4),-.1,.1), 
+        thi = mfsnoise(x.xy, 5.e-1, 5.e2, .4);
+    // Mountains
+    float d = x.z +.2 - .3*(.5*tlo + thi);
+    d = min(d, x.z + 1. - .1*thi);
+    
+    // Guards
+    float guard = -length(max(abs(y)-vec3(.5*dr*c.xx, .6),0.));
+    guard = abs(guard)+dr*.1;
+    d = min(d, guard);
+
+    vec2 sdf = vec2(d, 1.);
+   
+    // Floor*/
+//    vec2 sda = vec2(x.z+1./*-.001*sin(205.*x.y-5.*iTime)*/, 2.);
+ //   sdf = mix(sdf, sda, step(sda.x, sdf.x));
+    
+    /*
     x += iTime*c.yxy*1.e-1-iNBeats*c.xxy;
     
     vec2 dis = 12.*vec2((.1+.05*iScale)*valuenoise(x-2.-2.e-1*iTime),(.1+.05*iScale)*valuenoise(x.xy-5.-2.e-1*iTime));
@@ -550,54 +719,8 @@ vec2 scene(vec3 x) // Vortex scene
     float guard = -length(max(abs(y)-vec3(.5*dr*c.xx, .6),0.));
     guard = abs(guard)+dr*.1;
     d = min(d, guard);
-    
-    return vec2(d, 1.);
-}
-
-vec2 scene2(vec3 x) // City scene
-{
-    //displacement
-    vec2 dis = 12.*vec2((.1+.05*iScale)*valuenoise(x-2.-1.e-1*iTime),(.1+.05*iScale)*valuenoise(x.xy-5.-1.e-1*iTime));
-    
-    //city
-    vec3 v = vor(7.*x.xy-iNBeats-dis);
-//     float h = .3*clamp(iScale, 0., 1.)*valuenoise(v.yz+1.);
-    float h = .4*rand(v.yz+7.+iNBeats)+.2*valuenoise(v.yz+7.+iNBeats)*clamp(5.*iScale, 0., 1.)+.1*valuenoise(v.yz-.4*iTime);
-    float d = stroke(zextrude(x.z+.1-.2*x.y, stroke(v.x,.15+.15*clamp(3.*iScale, 0., 1.)), h),.1);
-
-    //artificial guards for artifacts
-    float dr = .065;
-    vec3 y = mod(x, dr)-.5*dr;
-    float guard = -length(max(abs(y)-vec3(.5*dr*c.xx, .6),0.));
-    guard = abs(guard)+dr*.1;
-    d = min(d, guard);
-    
-    //coloring
-    ind = vec3(v.yz, 0.);
-
-    //floor
-    return add(vec2(d, 1.), vec2(x.z, 2.));
-}
-
-vec2 scene3(vec3 x) // shattered sphere glass
-{
-    x = rot(.05*vec3(1.,2.,3.)*iTime+iNBeats*c.xxx)*x;
-    vec3 y = mod(x, 1.)-.5;
-    vec4 v = (length(y)-.5)*c.xxxx, w  = vor(2.*x-(.2+.1*iScale)*valuenoise(x.xy-2.-1.*iTime));
-    ind = v.gba+.1*w.gba;
-    float d = max(-stroke(.4*w.x,5.e-3+1.e-3*iScale), stroke(v.x,1.e-1));
-    d = max(-length(x)+1., d);
-    return vec2(abs(d)-.001, 1.);
-}
-
-vec2 scene4(vec3 x)
-{
-    x = rot(.05*vec3(1.,2.,3.)*iTime+iNBeats)*x;
-    vec4 v = vor(.5*x-(.1+.05*iScale)*valuenoise(x.xy-2.-1.*iTime)), w  = vor(2.*x-(.2+.1*iScale)*valuenoise(x.xy-2.-1.*iTime));
-    ind = v.gba+.1*w.gba;
-    float d = max(-stroke(.4*w.x,5.e-3+1.e-3*iScale), stroke(v.x,1.e-1));
-    //d = max(-length(x)+1., d);
-    return vec2(abs(d)-.001, 1.);
+    */
+    return sdf;
 }
 
 //performs raymarching
@@ -666,8 +789,8 @@ void camera1(out vec3 ro, out vec3 r, out vec3 u, out vec3 t)
 {
     ro = c.yyx;
     r = c.xyy;
-    u = c.yxx;
-    t = c.yxy;
+    u = c.yxy;
+    t = c.yyy;
 }
 
 vec3 synthcol(float scale, float phase)
@@ -691,21 +814,33 @@ vec3 stdcolor(vec2 x)
 	return 0.5 + 0.5*cos(iTime+x.xyx+vec3(0,2,4));
 }
 
+bool hfloor = false;
 vec3 color(float rev, float ln, float index, vec2 uv, vec3 x)
 {
     vec3 col = c.yyy;
     if(index == 1.)
     {
-   		vec3 c1 = stdcolor(x.xy+.5*rand(ind.xy+17.)+iNBeats), 
-        	c2 = stdcolor(x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)+iNBeats+11.+uv), 
-            c3 = stdcolor(x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)+iNBeats+23.+uv);
-		col = .1*c1*vec3(1.,1.,1.) + .2*c1*vec3(1.,1.,1.)*ln + vec3(1.,1.,1.)*pow(rev,2.*(2.-1.5*clamp(iScale,0.,1.))) + 2.*c1*pow(rev, 8.)+3.*c1*pow(rev, 16.);
-		col = clamp(.33*col, 0., 1.);
-        //col = abs(col);
+        x *= 1.e-2;
+   		vec3 c1 = stdcolor(1.5e2*x.z+x.xy+.5*rand(ind.xy+17.)+iNBeats), 
+        	c2 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)+iNBeats+11.+uv), 
+            c3 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)+iNBeats+23.+uv);
+		col = .1*c1*vec3(1.,1.,1.) + .2*c1*vec3(1.,1.,1.)*ln + 1.5*vec3(1.,1.,1.)*pow(rev,2.*(2.-1.5*clamp(iScale,0.,1.))) + 2.*c1*pow(rev, 8.)+3.*c1*pow(rev, 16.);
+        col = clamp(.23*col, 0., 1.);
 	}
     else if(index == 2.)
     {
-        return stdcolor(x.xy+.5*rand(ind.xy+17.)+iNBeats);
+        x *= 1.e-1;
+        hfloor = true;
+        return .5*stdcolor(x.xy+.5*rand(ind.xy+17.)+iNBeats);
+    }
+    else if(index == 3.)
+    {
+        x *= 1.e-2;
+   		vec3 c1 = stdcolor(1.5e2*x.z+x.xy+.5*rand(ind.xy+27.)+iNBeats), 
+        	c2 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)+iNBeats+21.+uv), 
+            c3 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)+iNBeats+33.+uv);
+		col = .4*c1*vec3(1.,1.,1.) + .2*c1*vec3(1.,1.,1.)*ln + .5*vec3(1.,1.,1.)*pow(rev,2.*(2.-1.5*clamp(iScale,0.,1.))) + 2.*c1*pow(rev, 8.)+3.*c1*pow(rev, 16.);
+        col = clamp(col, 0., 1.);
     }
     return col;
 }
@@ -714,7 +849,7 @@ vec3 color(float rev, float ln, float index, vec2 uv, vec3 x)
 vec4 thick(vec2 x, vec4 sdf, vec2 n)
 {
     for(int i=1; i<6; ++i)
-		sdf = add(vec4(stroke(sdf.x*n.x*n.y*2.*valuenoise((3.+4.*iScale)*x-2.-1.*iTime-1.2), .01), 3.e-3/abs(sdf.x+.2*valuenoise(x-2.-1.*iTime))*stdcolor(x+c.xx*.3*float(i))), sdf); 
+		sdf = add(vec4(stroke(sdf.x*n.x*n.y*2.*snoise((3.+4.*iScale)*x-2.-1.*iTime-1.2), .01), 3.e-3/abs(sdf.x+.2*snoise(x-2.-1.*iTime))*stdcolor(x+c.xx*.3*float(i))), sdf); 
     return sdf;
 }
 
@@ -735,42 +870,92 @@ vec2 normal(vec2 x)
     return normalize(vec2(geometry(x+dx*c.xy).x-s, geometry(x+dx*c.yx).x-s));
 }
 
+float star(vec2 x, float r0)
+{
+    return 1.-smoothstep(.5*r0, r0, length(x));
+}
+
+// Background 1 (Moon)
+vec3 background1(vec2 x)
+{
+    //Stars
+    float dr = .03, scale;
+    vec2 y = mod(x, dr)-.5*dr;
+    float rs = rand(x-y)*.005,
+        dx = -.5*(dr-rs)+(dr-2.*rs)*rand(x-y+1.),
+        dy = -.5*(dr-rs)+(dr-2.*rs)*rand(x-y+2.);
+    scale = star(y-vec2(dx,dy), rs);
+    vec3 color = scale*clamp(8.*rand(x.xy+4.)*stdcolor(rand(x-y+3.)*x.xy), 0., 1.); 
+    
+    // Star nebula
+    float f = mfsnoise(x.xy-6.93, 2.e-1, 1.e2, .55);
+    color += mix(c.yyy, stdcolor(x), .5+.95*f);
+    color += mix(c.yyy, 2.*stdcolor(x+4.), .5+.33*f);
+    color += mix(c.yyy, stdcolor(x+8.), .5+.79*f);
+    
+    //vec3 sc = 1.3*stdcolor(1.5e0*x.y+x.xy+.5*rand(ind.xy+17.));
+    //sc += mix(sc, 1.3*stdcolor(1.5e0*x.y+x.xy*1.3+1.5*rand(ind.xy+17.)),.5);
+    //color += sc;
+    
+    return clamp(color, 0., 1.);
+}
+
+vec3 bandc(vec2 x, float a)
+{
+    return mix(c.yyy, c.xxy, step(.5*a, mod(x.x+x.y-.1*iTime, a)));
+}
+
+vec4 gir(vec2 x, float r)
+{
+    vec4 sdf = vec4(dgear(x, vec2(r-.015, r), floor(107.143*r)), c.xxy);
+    sdf = add(sdf, vec4(length(x)-.536*r, c.yyy));
+    sdf = add(sdf, vec4(abs(length(x)-.321*r)-.036*r, c.xxy));
+    return sdf;
+}
+
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
     vec2 uv = fragCoord/iResolution.yy-.5;
+    vec3 col = c.yyy;
     
     // Scene 1: 2D; Greet the party.
-    if(iTime < 6.)
+    
+    // Scene 2: 2D; "Loading Bar" Logo with gears
+    if(iTime < 600.)
     {
-        vec4 sdf = vec4(1., col);
-        float d = 1., dc = 1., dca = 1.;
+       	col = mix(clamp(col,c.yyy,c.xxx), bandc(uv, .1), smoothstep(1.5/iResolution.y, -1.5/iResolution.y, stroke(logo(uv-.5*c.xy,.2),.05)));
+       	col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, stroke(stroke(logo(uv-.5*c.xy,.2),.05),.001)));
+    	
+        float n = 15., dr = .8*.14;
+		mat2 r = rot(1.1*iTime), mr = rot(-1.1*iTime-2.*pi/n*dr);
+        vec4 sdf = gir(r*(uv-.3*c.xy), dr);
+        sdf = add(sdf, gir(mr*(uv-.09*c.xy), dr));
+        sdf = add(sdf, gir(r*(uv-.7*c.xy), dr));
         
-        vec2 vn = 2.e-2*vec2(valuenoise(2.3*uv-2.*vec2(1.5,2.4)*iTime), valuenoise(1.7*uv-2.4*vec2(1.2,2.1)*iTime));
+        //decoration gears
+        sdf = add(sdf, gir(r*r*(uv+.065*c.xy), .5*dr));
+        sdf = add(sdf, gir(mr*(uv+.22*c.xy), dr));
         
-        // "Hello, Vortex III"
-        {
-            size = 1.54;
-            carriage = -.25*c.xy;
-            int str[17] = int[17](72, 101, 108, 108, 111, 44, 32, 86, 111, 114, 116, 101, 120, 32, 73, 73, 73);
-            for(int i=0; i<17; ++i)
-            {
-                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
-                {
-                    vec2 bound = uv-carriage-vn+.05*c.yx;
-                    d = min(d, dglyph(bound, str[i]));
-                    float d0 = dglyphpts(bound, str[i]);
-                    dc = min(dc, d0);
-                    dca = min(dca, stroke(d0, 2.e-3));
-                    carriage += glyphsize.x*c.xy + .01*c.xy;
-                }
-            }
-        }
-        d = stroke(d, 2.4e-3)+.1*length(vn);
-        sdf = add(sdf, vec4(d, c.xxx));
-        sdf = add(sdf, vec4(dca, c.xxx));
-        sdf = add(sdf, vec4(dc, c.xyy));
+        col = mix(clamp(col,c.yyy,c.xxx), sdf.gba, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x));
+        //col = mix(col, c.xxy, clamp(1.e-3/length(sdf.x-.01), 0., 1.));
         
-        col = sdf.gba * smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x) * blend(1., 5., 1.);        
+        /*
+        float d = 1., n=15.;
+        mat2 r = rot(1.1*iTime), mr = rot(-1.1*iTime-pi/n);
+        d = min(d, dgear(r*(uv-.3*c.xy), .6*vec2(.12,.14), n));
+        d = min(d, dgear(r*(uv-.7*c.xy), .6*vec2(.12,.14), n));
+        d = min(d, dgear(mr*(uv-.04*c.xy), .6*vec2(.12,.14), n));
+        col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, d));
+
+        col = mix(clamp(col,c.yyy,c.xxx), c.yyy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, length(uv-.3*c.xy)-.6*.075));
+        col = mix(clamp(col,c.yyy,c.xxx), c.yyy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, length(uv-.7*c.xy)-.6*.075));
+    	col = mix(clamp(col,c.yyy,c.xxx), c.yyy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, length(uv-.04*c.xy)-.6*.075));
+
+        col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, abs(length(uv-.3*c.xy)-.6*.045)-.005));
+        col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, abs(length(uv-.7*c.xy)-.6*.045)-.005));
+    	col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, abs(length(uv-.04*c.xy)-.6*.045)-.005));
+*/
+
     }
     
     // Post-process
@@ -782,5 +967,6 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
 
 void main()
 {
-    mainImage(gl_FragColor, gl_FragCoord.xy);
+    mainImage(gl_FragColor, gl_FragCoord);
 }
+
