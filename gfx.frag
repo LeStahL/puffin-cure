@@ -638,64 +638,16 @@ vec2 talien(vec3 x, float a)
 }
 
 vec3 ind;
-vec2 scene(vec3 x) // Moon Scene
+
+vec2 scene1(vec3 x) // Mountain scene
 {
-    vec2 sdf = c.xy;
-    x *= rot(vec3(1.1,2.2,3.3)*iTime);
-    sdf = add(sdf,talien(x, .2));
-
-    //vec2 sdf = talien(x, .2);
-    
-    //for(int i=0; i<4; ++i)
-    {
-//    	sdf = add(sdf, vec2(dtetrahedron(x,.2,.04), 1.));
-    }
-    
-    /*
-    float dr = 4.;
-    vec3 y = x;
-    x = mod(x, dr);
-    
-    float scale = clamp(smoothstep(0.,5., iTime-x.z),0.,1.);
-    
-    vec3 dt = .01*vec3(sin(iTime), cos(iTime), sin(iTime));
-    // Tree
-    // Main branch
-    float d = abs(lineseg(x, c.yxy, c.yxx))-.2;
-    d = softmin(d, abs(lineseg(x, c.yxx, vec3(.3,1.3,1.3)-dt))-.1, .1);
-	d = softmin(d, abs(lineseg(x, c.yxx, vec3(-.3,.7,1.3)-dt))-.1, .1);
-	d = softmin(d, abs(lineseg(x, c.yxx, vec3(.5,.7,1.)+dt))-.08, .1);
-
-    // First small branch
-	d = softmin(d, abs(lineseg(x, vec3(.3,1.3,1.3), vec3(.2,1.5,1.5)-dt))-.05, .1);
-    d = softmin(d, abs(lineseg(x, vec3(.3,1.3,1.3), vec3(.7,1.5,1.5)-dt))-.05, .1);
-    
-    // Second small branch
-	d = softmin(d, abs(lineseg(x, vec3(.5,.7,1.)+dt, vec3(.6,.5,1.2)-dt))-.04, .1);
-	d = softmin(d, abs(lineseg(x, vec3(.5,.7,1.)+dt, vec3(.6,.9,1.2)-dt))-.04, .1);
-    
-    //d += .01*snoise(2.*(x.xy+x.yz+x.zx+2.*x.x)-iTime);
-    
-    vec2 sdf = vec2(d, 1.);
-
-    sdf = add(sdf, vec2(length(x-vec3(0.,.8,1.)-dt)-.1, 3.));
-    sdf = add(sdf, vec2(length(x-vec3(.1,.9,.7)-dt)-.1, 3.));
-    sdf = add(sdf, vec2(length(x-vec3(-.1,.9,.8)-dt)-.08, 3.));
-    
-    sdf = add(sdf, vec2(length(x-vec3(.3,.8,1.05)+dt)-.05, 3.));
-    sdf = add(sdf, vec2(length(x-vec3(.5,.7,.95)-dt)-.1, 3.));
-    
-    sdf = add(sdf, vec2(length(x-vec3(.1,1.1,1.2)+dt)-.07, 3.));
-    
-    sdf.x -= -1.+scale;
-    */
-    /*
-    x += iTime*c.yxy-.05*x.y;
+    x += 2.*iTime*c.yxy-.05*x.y;
     
     float dr = .3;
     vec3 y = mod(x, dr)-.5*dr;
     float tlo = clamp(mfsnoise(x.xy, 1.e-1, 5.e-1, .4),-.1,.1), 
         thi = mfsnoise(x.xy, 5.e-1, 5.e2, .4);
+    
     // Mountains
     float d = x.z +.2 - .3*(.5*tlo + thi);
     d = min(d, x.z + 1. - .1*thi);
@@ -707,23 +659,9 @@ vec2 scene(vec3 x) // Moon Scene
 
     vec2 sdf = vec2(d, 1.);
    
-    // Floor*/
-//    vec2 sda = vec2(x.z+1./*-.001*sin(205.*x.y-5.*iTime)*/, 2.);
- //   sdf = mix(sdf, sda, step(sda.x, sdf.x));
-    
-    /*
-    x += iTime*c.yxy*1.e-1-iNBeats*c.xxy;
-    
-    vec2 dis = 12.*vec2((.1+.05*iScale)*valuenoise(x-2.-2.e-1*iTime),(.1+.05*iScale)*valuenoise(x.xy-5.-2.e-1*iTime));
-    float d = x.z - mfvaluenoise(x.xy-dis, 2., 40., .45+.2*clamp(3.*iScale, 0., 1.));
-    d = max(d, -.5*mfvaluenoise(x.xy-dis, 2., 10., .45+.2*clamp(3.*iScale,0., 1.)));
-   
-    float dr = .165;
-    vec3 y = mod(x, dr)-.5*dr;
-    float guard = -length(max(abs(y)-vec3(.5*dr*c.xx, .6),0.));
-    guard = abs(guard)+dr*.1;
-    d = min(d, guard);
-    */
+    // Floor
+    vec2 sda = vec2(x.z+1./*-.001*sin(205.*x.y-5.*iTime)*/, 2.);
+    sdf = mix(sdf, sda, step(sda.x, sdf.x));
     return sdf;
 }
 
@@ -791,10 +729,10 @@ vec2 scene(vec3 x) // Moon Scene
 //camera for scene 1
 void camera1(out vec3 ro, out vec3 r, out vec3 u, out vec3 t)
 {
-    ro = c.yyx;
+    ro = .5*c.yyx;
     r = c.xyy;
-    u = c.yxy;
-    t = c.yyy;
+    u = c.yyx+.3*c.yxy;
+    t = c.yxy+.4*c.yyx;
 }
 
 vec3 synthcol(float scale, float phase)
@@ -825,9 +763,9 @@ vec3 color(float rev, float ln, float index, vec2 uv, vec3 x)
     if(index == 1.)
     {
         x *= 1.e-2;
-   		vec3 c1 = stdcolor(1.5e2*x.z+x.xy+.5*rand(ind.xy+17.)+iNBeats), 
-        	c2 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)+iNBeats+11.+uv), 
-            c3 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)+iNBeats+23.+uv);
+   		vec3 c1 = stdcolor(1.5e2*x.z+x.xy+.5*rand(ind.xy+17.)/*+iNBeats*/), 
+        	c2 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)/*+iNBeats*/+11.+uv), 
+            c3 = stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)/*+iNBeats*/+23.+uv);
 		col = .1*c1*vec3(1.,1.,1.) + .2*c1*vec3(1.,1.,1.)*ln + 1.5*vec3(1.,1.,1.)*pow(rev,2.*(2.-1.5*clamp(iScale,0.,1.))) + 2.*c1*pow(rev, 8.)+3.*c1*pow(rev, 16.);
         col = clamp(.23*col, 0., 1.);
 	}
@@ -835,7 +773,7 @@ vec3 color(float rev, float ln, float index, vec2 uv, vec3 x)
     {
         x *= 1.e-1;
         hfloor = true;
-        return .5*stdcolor(x.xy+.5*rand(ind.xy+17.)+iNBeats);
+        return .5*stdcolor(x.xy+.5*rand(ind.xy+17.)/*+iNBeats*/);
     }
     else if(index == 3.)
     {
@@ -879,7 +817,19 @@ float star(vec2 x, float r0)
     return 1.-smoothstep(.5*r0, r0, length(x));
 }
 
-// Background 1 (Moon)
+vec3 bandc(vec2 x, float a)
+{
+    return mix(c.yyy, c.xxy, step(.5*a, mod(x.x+x.y-.1*iTime, a)));
+}
+
+vec4 gir(vec2 x, float r)
+{
+    vec4 sdf = vec4(dgear(x, vec2(r-.015, r), floor(107.143*r)), c.xxy);
+    sdf = add(sdf, vec4(length(x)-.536*r, c.yyy));
+    sdf = add(sdf, vec4(abs(length(x)-.321*r)-.036*r, c.xxy));
+    return sdf;
+}
+
 vec3 background1(vec2 x)
 {
     //Stars
@@ -897,24 +847,7 @@ vec3 background1(vec2 x)
     color += mix(c.yyy, 2.*stdcolor(x+4.), .5+.33*f);
     color += mix(c.yyy, stdcolor(x+8.), .5+.79*f);
     
-    //vec3 sc = 1.3*stdcolor(1.5e0*x.y+x.xy+.5*rand(ind.xy+17.));
-    //sc += mix(sc, 1.3*stdcolor(1.5e0*x.y+x.xy*1.3+1.5*rand(ind.xy+17.)),.5);
-    //color += sc;
-    
     return clamp(color, 0., 1.);
-}
-
-vec3 bandc(vec2 x, float a)
-{
-    return mix(c.yyy, c.xxy, step(.5*a, mod(x.x+x.y-.1*iTime, a)));
-}
-
-vec4 gir(vec2 x, float r)
-{
-    vec4 sdf = vec4(dgear(x, vec2(r-.015, r), floor(107.143*r)), c.xxy);
-    sdf = add(sdf, vec4(length(x)-.536*r, c.yyy));
-    sdf = add(sdf, vec4(abs(length(x)-.321*r)-.036*r, c.xxy));
-    return sdf;
 }
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
@@ -923,9 +856,41 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     vec3 col = c.yyy;
     
     // Scene 1: 2D; Greet the party.
+    if(iTime < 6.)
+    {
+        vec4 sdf = vec4(1., col);
+        float d = 1., dc = 1., dca = 1.;
+        
+        vec2 vn = 1.e-2*vec2(snoise(1.36*uv-.66*vec2(1.5,2.4)*iTime), snoise(1.35*uv-.4*vec2(1.2,2.1)*iTime));
+        
+        // "Hello, UNC 2018"
+        {
+            size = 1.54;
+            carriage = -.25*c.xy;
+            int str[14] = int[14](72, 101, 108, 108, 111, 32, 85, 78, 67, 32, 50, 48, 49, 56);
+            for(int i=0; i<14; ++i)
+            {
+                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                {
+                    vec2 bound = uv-carriage-vn+.05*c.yx;
+                    d = min(d, dglyph(bound, str[i]));
+                    float d0 = dglyphpts(bound, str[i]);
+                    dc = min(dc, d0);
+                    dca = min(dca, stroke(d0, 2.e-3));
+                    carriage += glyphsize.x*c.xy + .01*c.xy;
+                }
+            }
+        }
+        d = stroke(d, 3.4e-3)+.1*length(vn);
+        sdf = add(sdf, vec4(d, c.xxx));
+        sdf = add(sdf, vec4(dca, c.xxx));
+        sdf = add(sdf, vec4(dc, c.xxy));
+        
+        col = sdf.gba * smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x) * blend(1., 5., 1.);        
+    }
     
     // Scene 2: 2D; "Loading Bar" Logo with gears
-    if(iTime < 600.)
+    else if(iTime < 16.)
     {
        	col = mix(clamp(col,c.yyy,c.xxx), bandc(uv, .1), smoothstep(1.5/iResolution.y, -1.5/iResolution.y, stroke(logo(uv-.5*c.xy,.2),.05)));
        	col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, stroke(stroke(logo(uv-.5*c.xy,.2),.05),.001)));
@@ -940,26 +905,113 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         sdf = add(sdf, gir(r*r*(uv+.065*c.xy), .5*dr));
         sdf = add(sdf, gir(mr*(uv+.22*c.xy), dr));
         
-        col = mix(clamp(col,c.yyy,c.xxx), sdf.gba, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x));
-        //col = mix(col, c.xxy, clamp(1.e-3/length(sdf.x-.01), 0., 1.));
+        col = mix(clamp(col,c.yyy,c.xxx), sdf.gba, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x))* blend(7., 15., 1.);
+    }
+    
+    // Scene 3: Say who did this.
+    else if(iTime < 22.)
+    {
+        vec4 sdf = vec4(1., col);
+        float d = 1., dc = 1., dca = 1.;
         
-        /*
-        float d = 1., n=15.;
-        mat2 r = rot(1.1*iTime), mr = rot(-1.1*iTime-pi/n);
-        d = min(d, dgear(r*(uv-.3*c.xy), .6*vec2(.12,.14), n));
-        d = min(d, dgear(r*(uv-.7*c.xy), .6*vec2(.12,.14), n));
-        d = min(d, dgear(mr*(uv-.04*c.xy), .6*vec2(.12,.14), n));
-        col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, d));
+        vec2 vn = 1.e-2*vec2(snoise(1.36*uv-.66*vec2(1.5,2.4)*iTime), snoise(1.35*uv-.4*vec2(1.2,2.1)*iTime));
+        
+        // "QM. NR4. Team210."
+        {
+            size = 1.54;
+            carriage = -.25*c.xy;
+            int str[17] = int[17](81, 77, 46, 32, 78, 82, 52, 46, 32, 84, 101, 97, 109, 50, 49, 48, 46);
+            for(int i=0; i<17; ++i)
+            {
+                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                {
+                    vec2 bound = uv-carriage-vn+.05*c.yx;
+                    d = min(d, dglyph(bound, str[i]));
+                    float d0 = dglyphpts(bound, str[i]);
+                    dc = min(dc, d0);
+                    dca = min(dca, stroke(d0, 2.e-3));
+                    carriage += glyphsize.x*c.xy + .01*c.xy;
+                }
+            }
+        }
+        d = stroke(d, 3.4e-3)+.1*length(vn);
+        sdf = add(sdf, vec4(d, c.xxx));
+        sdf = add(sdf, vec4(dca, c.xxx));
+        sdf = add(sdf, vec4(dc, c.xxy));
+        
+        col = sdf.gba * smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x) * blend(17., 21., 1.);        
+    }
+    
+    // Scene 4: Mountains.
+    else if(iTime < 42.)
+    {
+        vec3 ro, r, u, t, x, dir;
+    	camerasetup(camera1, ro, r, u, t, uv, dir);
+    	
+        float d = (.15-ro.z)/dir.z;
+        if(uv.y>.1)//THAT WAS THE RELEVANT OPTIMIZATION
+        {
+            // Draw Background here.
+            col = background1(uv);
+             
+            post(col, uv);
+            fragColor = vec4(col * blend(23., 41., 1.), 1.);
+            return;
+        }
+        else
+        {
+            bool hit;
+            vec2 s;
+            raymarch(scene1, x, ro, d, dir, s, 300, 1.e-4, hit);
+            if(hit == false || x.y > 12.)
+            {
+                // Draw Background here.
+                col = background1(uv);
+                
+                post(col, uv);
+                fragColor = vec4(col * blend(23., 41., 1.), 1.);
+                return;
+            }
 
-        col = mix(clamp(col,c.yyy,c.xxx), c.yyy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, length(uv-.3*c.xy)-.6*.075));
-        col = mix(clamp(col,c.yyy,c.xxx), c.yyy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, length(uv-.7*c.xy)-.6*.075));
-    	col = mix(clamp(col,c.yyy,c.xxx), c.yyy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, length(uv-.04*c.xy)-.6*.075));
+            vec3 n;
+            calcnormal(scene1, n, 5.e-3, x);
 
-        col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, abs(length(uv-.3*c.xy)-.6*.045)-.005));
-        col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, abs(length(uv-.7*c.xy)-.6*.045)-.005));
-    	col = mix(clamp(col,c.yyy,c.xxx), c.xxy, smoothstep(1.5/iResolution.y, -1.5/iResolution.y, abs(length(uv-.04*c.xy)-.6*.045)-.005));
-*/
+            vec3 l = x+2.*c.yyx, re = normalize(reflect(-l,n)), v = normalize(x-ro);
+            float rev = abs(dot(re,v)), ln = abs(dot(l,n));
 
+            col = color(rev, ln, s.y, uv, x);
+
+            if(s.y == 2.)
+            {
+
+                for(float i = .7; i > .5; i -= .2)
+                {
+                    //reflections
+                    dir = normalize(reflect(dir, n));
+        //             dir = normalize(refract(dir, n, i));
+                    d = 5.e-2;
+                    ro = x;
+                    raymarch(scene1, x, ro, d, dir, s, 50, 1.e-3, hit);
+                    if(hit == false||x.y>12.)
+                    {
+                        col = mix(col,background1(uv), .5);
+                        post(col, uv);
+                        fragColor = vec4(col, 1.);
+                        break;
+                    }
+                    calcnormal(scene1, n, 1.e-3, x);
+                    l = x+2.*c.yyx;
+                    re = normalize(reflect(-l,n)); 
+                    v = normalize(x-ro);
+                    rev = abs(dot(re,v));
+                    ln = abs(dot(l,n));
+
+                    col = mix(col, color(rev, ln, s.y, uv, x), i);
+                }
+            }
+        }
+        
+        col *=  blend(23., 41., 1.);
     }
     
     // Post-process
