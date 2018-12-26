@@ -1014,6 +1014,77 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         col *=  blend(23., 41., 1.);
     }
     
+    // Greet the friends.
+    else if(iTime < 48.)
+    {
+        vec4 sdf = vec4(1., col);
+        float d = 1., dc = 1., dca = 1.;
+        
+        vec2 vn = 1.e-2*vec2(snoise(1.36*uv-.66*vec2(1.5,2.4)*iTime), snoise(1.35*uv-.4*vec2(1.2,2.1)*iTime));
+        
+        // See GREETINGS.
+        {
+            size = 1.04;
+            int str[24];
+            int nstr;
+            if(uv.y > .335+vn.y)
+            {
+                carriage = -.4*c.xy+.4*c.yx;
+                str = int[24](68, 101, 107, 97, 100, 101, 110, 99, 101, 46, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0);
+            }
+            else if(uv.y > .235+vn.y)
+            {
+                carriage = -.4*c.xy+.3*c.yx;
+                str = int[24](74, 117, 109, 97, 108, 97, 117, 116, 97, 46, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0);
+            }
+            else if(uv.y > .135+vn.y)
+            {
+                carriage = -.4*c.xy+.2*c.yx;
+                str = int[24](75, 101, 119, 108, 101, 114, 115, 32, 38, 32, 77, 70, 88, 46, 0, 0, 0,0,0,0,0,0,0,0);
+            }
+            else if(uv.y > .035+vn.y)
+            {
+                carriage = -.4*c.xy+.1*c.yx;
+                str = int[24](68, 97, 109, 111, 110, 101, 115, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0);
+            }
+            else if(uv.y > -.065+vn.y)
+            {
+                carriage = -.4*c.xy+.0*c.yx;
+                str = int[24](77, 97, 116, 116, 32, 67, 117, 114, 114, 101, 110, 116, 46, 0, 0, 0, 0,0,0,0,0,0,0,0);
+            }
+            else if(uv.y > -.3+vn.y)
+            {
+                carriage = -.4*c.xy-.15*c.yx;
+                str = int[24](83, 99, 104, 110, 97, 40, 112, 112, 115, 124, 114, 99, 104, 41, 103, 105, 114, 108, 115, 46,0,0,0,0);
+            }
+            else
+            {
+                col = c.yyy;
+                post(col, uv);
+                fragColor = vec4(col, 1.);
+                return;
+            }
+            for(int i=0; i<24; ++i)
+            {
+                //if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                {
+                    vec2 bound = uv-carriage-vn+.05*c.yx;
+                    d = min(d, dglyph(bound, str[i]));
+                    float d0 = dglyphpts(bound, str[i]);
+                    dc = min(dc, d0);
+                    dca = min(dca, stroke(d0, 2.e-3));
+                    carriage += glyphsize.x*c.xy + .01*c.xy;
+                }
+            }
+        }
+        d = stroke(d, 3.4e-3)+.1*length(vn);
+        sdf = add(sdf, vec4(d, c.xxx));
+        sdf = add(sdf, vec4(dca, c.xxx));
+        sdf = add(sdf, vec4(dc, c.xxy));
+        
+        col = sdf.gba * smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x) * blend(43., 47., 1.) ;
+    }
+    
     // Post-process
     post(col, uv);
     
