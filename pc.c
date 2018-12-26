@@ -338,6 +338,11 @@ int WINAPI demo(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, in
     HGLRC glrc = wglCreateContext(hdc);
     wglMakeCurrent (hdc, glrc);
     
+    // Draw black screen
+    glClearColor(0.,0.,0.,1.);
+    glClear(GL_COLOR_BUFFER_BIT);
+    SwapBuffers(hdc);
+    
     // OpenGL extensions
     glGetProgramiv = (PFNGLGETPROGRAMIVPROC) wglGetProcAddress("glGetProgramiv");
     glGetShaderiv = (PFNGLGETSHADERIVPROC) wglGetProcAddress("glGetShaderiv");

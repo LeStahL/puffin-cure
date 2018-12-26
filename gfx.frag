@@ -1139,7 +1139,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         if(uv.x > .5)
         {
             // Draw Background here.
-                col = background1(uv);
+                col = background1(uv) * blend(49., 67., 1.);
                 
                 post(col, uv);
                 fragColor = vec4(col, 1.);
@@ -1153,7 +1153,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             if(hit == false || x.y > 12.)
             {
                 // Draw Background here.
-                col = background1(uv);
+                col = background1(uv) * blend(49., 67., 1.);
                 
                 post(col, uv);
                 fragColor = vec4(col, 1.);
