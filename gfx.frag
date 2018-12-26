@@ -637,7 +637,7 @@ vec2 talien(vec3 x, float a)
     return sdf;
 }
 
-vec3 ind;
+vec3 ind = c.xxx;
 
 vec2 scene1(vec3 x) // Mountain scene
 {
@@ -664,6 +664,39 @@ vec2 scene1(vec3 x) // Mountain scene
     sdf = mix(sdf, sda, step(sda.x, sdf.x));
     return sdf;
 }
+
+vec2 scene2(vec3 x) // Virus scene
+{
+    vec2 sdf = c.xy;
+    x *= rot(vec3(1.1,2.2,3.3)*iTime);
+    sdf = add(sdf,talien(x, .2));
+    return sdf;
+}
+
+//performs raymarching
+//scene: name of the scene function
+//xc: 	 name of the coordinate variable
+//ro:	 name of the ray origin variable
+//d:	 name of the distance variable
+//dir:	 name of the direction variable
+//s:	 name of the scenestruct variable
+//N:	 number of iterations used
+//eps:	 exit criterion
+//flag:  name of the flag to set if raymarching succeeded
+#define raymarch(scene, xc, ro, d, dir, s, N, eps, flag) \
+	flag = false;\
+	for(int i=0; i<N; ++i)\
+    {\
+        xc = ro + d*dir;\
+        s = scene(xc);\
+        if(s.x < eps)\
+        {\
+            flag = true;\
+            break;\
+        }\
+        d += s.x;\
+    }
+
 
 //performs raymarching
 //scene: name of the scene function
@@ -726,13 +759,22 @@ vec2 scene1(vec3 x) // Mountain scene
     	col += vec3(0., 0.05, 0.1)*sin(uv.y*1050.+ 5.*iTime);\
 	}
 	
-//camera for scene 1
+//camera for mountain
 void camera1(out vec3 ro, out vec3 r, out vec3 u, out vec3 t)
 {
     ro = .5*c.yyx;
     r = c.xyy;
     u = c.yyx+.3*c.yxy;
     t = c.yxy+.4*c.yyx;
+}
+
+//camera for virus scene
+void camera2(out vec3 ro, out vec3 r, out vec3 u, out vec3 t)
+{
+    ro = c.yyx;
+    r = c.xyy;
+    u = c.yxy;
+    t = c.yyy;
 }
 
 vec3 synthcol(float scale, float phase)
@@ -1023,6 +1065,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         vec2 vn = 1.e-2*vec2(snoise(1.36*uv-.66*vec2(1.5,2.4)*iTime), snoise(1.35*uv-.4*vec2(1.2,2.1)*iTime));
         
         // See GREETINGS.
+        if(uv.x<1.)
         {
             size = 1.04;
             int str[24];
@@ -1083,6 +1126,48 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         sdf = add(sdf, vec4(dc, c.xxy));
         
         col = sdf.gba * smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x) * blend(43., 47., 1.) ;
+    }
+    
+    // Alien virus scene
+    else if(iTime < 68.)
+    {
+        vec3 ro, r, u, t, x, dir;
+    	camerasetup(camera2, ro, r, u, t, uv, dir);
+    	
+        float d = 0.;//(.15-ro.z)/dir.z;
+        //if(d<2.)
+        if(uv.x > .5)
+        {
+            // Draw Background here.
+                col = background1(uv);
+                
+                post(col, uv);
+                fragColor = vec4(col, 1.);
+                return;
+        }
+        else
+        {
+            bool hit;
+            vec2 s;
+            raymarch(scene2, x, ro, d, dir, s, 200, 1.e-4, hit);
+            if(hit == false || x.y > 12.)
+            {
+                // Draw Background here.
+                col = background1(uv);
+                
+                post(col, uv);
+                fragColor = vec4(col, 1.);
+                return;
+            }
+
+            vec3 n;
+            calcnormal(scene2, n, 5.e-3, x);
+
+            vec3 l = x+2.*c.yyx, re = normalize(reflect(-l,n)), v = normalize(x-ro);
+            float rev = abs(dot(re,v)), ln = abs(dot(l,n));
+
+            col = color(rev, ln, s.y, uv, x) * blend(49., 67., 1.);
+        }
     }
     
     // Post-process
