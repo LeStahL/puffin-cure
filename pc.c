@@ -230,6 +230,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     break;
             }
             break;
+        
+        case WM_RBUTTONDOWN:
+            ExitProcess(0);
+            break;
             
         case WM_TIMER:
             HDC hdc = GetDC(hwnd);
