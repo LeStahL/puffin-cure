@@ -366,10 +366,11 @@ float spline2(vec3 p0, vec3 p1, vec3 p2, vec3 x)
 
 
 // extrusion
+// extrusion
 float zextrude(float z, float d2d, float h)
 {
-    vec2 d = abs(vec2(min(d2d, 0.),z))-h*c.yx;
-    return min(max(d.x,d.y),0.)+length(max(d,0.));
+    vec2 w = vec2(-d2d, abs(z)-.5*h);
+    return length(max(w,0.));
 }
 
 
@@ -627,7 +628,7 @@ vec2 talien(vec3 x, float a)
     //float da = dtetrahedron(ind, .2, .04);
     float da = dicosahedron(ind, .2, .04);
     if(abs(da)-.025 < 0.)
-	    sdf = add(sdf, vec2(length(y)-(.05+.1*rand(ind))*a, 3.));
+	    sdf = add(sdf, vec2(length(y)-(.05+.1*rand(ind))*a, 4.));
 
     // Guards
 	float guard = -length(max(abs(y)-vec3(.5*dr*c.xx, .6),0.));
@@ -635,6 +636,19 @@ vec2 talien(vec3 x, float a)
     sdf.x = min(sdf.x, guard);
     
     return sdf;
+}
+
+// compute distance to regular triangle
+float dtrir(vec2 uv, float r)
+{
+    float dp = 2.*pi/3.;
+    vec2 p0 = vec2(r, 0.),
+        p1 = r*vec2(cos(dp), -sin(dp)),
+        p2 = r*vec2(cos(2.*dp), -sin(2.*dp)), 
+        pd = p2-p1;
+    
+    float d = min(dot(uv-p0,c.xz*(p1-p0).yx),dot(uv-p1, pd.yx*c.xz));
+	return min(d, dot(uv-p2, (p0-p2).yx*c.xz))/length(pd);
 }
 
 vec3 ind = c.xxx;
@@ -670,6 +684,30 @@ vec2 scene2(vec3 x) // Virus scene
     vec2 sdf = c.xy;
     x *= rot(vec3(1.1,2.2,3.3)*iTime);
     sdf = add(sdf,talien(x, .2));
+    return sdf;
+}
+
+vec2 scene3(vec3 x) // UNC triangle scene
+{
+    vec2 sdf = c.xy;
+    
+    x *= rot(vec3(1.1,2.2,3.3)*iTime);
+    
+    float rb;
+    for(int i=0; i<4; ++i)
+    {
+        rb = .15+.05*rand(float(i+6)*c.xx+7.);
+        mat3 r = rot(2.*vec3(1.1,2.2,3.3)*iTime+10.*rand(float(i+13)*c.xx+4.));
+        vec3 z = r*(x-rb*(-c.xxx+1.5*vec3(rand(float(i+1)*c.xx), rand(float(i+2)*c.xx), rand(float(i+3)*c.xx))));
+        sdf = add(sdf, vec2((zextrude(z.z, dtrir(z.xy, rb), rb)), 1.));
+    }
+    for(int i=4; i<8; ++i)
+    {
+        rb = .15+.05*rand(float(i+6)*c.xx+7.);
+        mat3 r = rot(2.*vec3(1.1,2.2,3.3)*iTime+10.*rand(float(i+13)*c.xx+4.));
+        vec3 z = r*(x-rb*(-c.xxx+1.5*vec3(rand(float(i+1)*c.xx), rand(float(i+2)*c.xx), rand(float(i+3)*c.xx))));
+        sdf = add(sdf, vec2((zextrude(z.z, dtrir(z.xy, rb), rb)), 4.));
+    }
     return sdf;
 }
 
@@ -829,9 +867,9 @@ vec3 color(float rev, float ln, float index, vec2 uv, vec3 x)
     else if(index == 4.)
     {
         x *= 1.e-2;
-   		vec3 c1 = 1.4*stdcolor(1.5e2*x.z+x.xy+.5*rand(ind.xy+47.)/*+iNBeats*/+14.), 
-        	c2 = 1.4*stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)/*+iNBeats*/+21.+uv), 
-            c3 = 1.4*stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)/*+iNBeats*/+33.+uv);
+   		vec3 c1 = 1.*stdcolor(1.5e2*x.z+x.xy+.5*rand(ind.xy+47.)/*+iNBeats*/+14.), 
+        	c2 = 1.*stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+12.)/*+iNBeats*/+21.+uv), 
+            c3 = 1.*stdcolor(1.5e2*x.z+x.xy+x.yz+x.zx+.5*rand(ind.xy+15.)/*+iNBeats*/+33.+uv);
 		col = .1*c1*vec3(1.,1.,1.) + .2*c1*vec3(1.,1.,1.)*ln + 1.5*vec3(1.,1.,1.)*pow(rev,2.*(2.-1.5*clamp(iScale,0.,1.))) + 2.*c1*pow(rev, 8.)+3.*c1*pow(rev, 16.);
         col = clamp(.23*col, 0., 1.);
 	}
@@ -899,6 +937,28 @@ vec3 background1(vec2 x)
     color += mix(c.yyy, stdcolor(x+8.), .5+.79*f);
     
     return clamp(color, 0., 1.);
+}
+
+// Background for the unc logo
+vec3 background2(vec2 x)
+{
+    //x *= rot((-1.+snoise(.1*iTime*c.xx))*.65*iTime);
+    vec3 bg = c.yyy;
+    float p = atan(x.y,x.x)/iTime,
+        n = 5.,
+        dmax = .3+.1*snoise(iTime*c.xx);
+    for(float i = 0.; i<n; i+=1.)
+    {
+        float d = i/n*dmax;
+        bg += background1((length(x)-.05+d-2.*iTime)*vec2(cos(p), sin(p))-.05*vec2(snoise(x.xy-iTime), snoise(x.xy+iTime)));
+    }
+    bg /= n;
+    return bg;
+}
+
+vec2 spd(vec3 x)
+{
+    return vec2(length(x)-.45, 1.);
 }
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
@@ -1221,7 +1281,50 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     }
     
     // Under Construction logo
-    
+    else if(iTime < 95.)
+    {
+        vec3 ro, r, u, t, x, dir;
+        vec2 s;
+    	camerasetup(camera2, ro, r, u, t, uv, dir);
+    	
+        // Graph traversal
+        float d = 0.;
+        bool hit0;
+        raymarch(spd, x, ro, d, dir, s, 15, 1.e-2, hit0);
+        
+        if(!hit0)
+        {
+            // Draw Background here.
+            col = background2(uv)* blend(76., 94., 1.);
+                
+            post(col, uv);
+            fragColor = vec4(col, 1.);
+            return;
+        }
+        else
+        {
+            bool hit;
+            
+            raymarch(scene3, x, ro, d, dir, s, 150, 1.e-4, hit);
+            if(hit == false || x.y > 12.)
+            {
+                // Draw Background here.
+                col = background2(uv)* blend(76., 94., 1.);
+                
+                post(col, uv);
+                fragColor = vec4(col, 1.);
+                return;
+            }
+            
+            vec3 n;
+            calcnormal(scene3, n, 5.e-3, x);
+
+            vec3 l = x+2.*c.yyx, re = normalize(reflect(-l,n)), v = normalize(x-ro);
+            float rev = abs(dot(re,v)), ln = abs(dot(l,n));
+
+            col = color(rev, ln, s.y, uv, x) * blend(76., 94., 1.);
+        }
+    }
     
     // Post-process
     post(col, uv);
