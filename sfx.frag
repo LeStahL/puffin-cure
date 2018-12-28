@@ -23,11 +23,12 @@
 uniform float iBlockOffset;
 uniform float iSampleRate;
 uniform float iVolume;
+
 #define PI radians(180.)
 float clip(float a) { return clamp(a,-1.,1.); }
-float theta(float x) { return smoothstep(0., 0.01, x); }
-float _sin(float a) { return sin(2. * PI * mod(a,1.)); }
-float _sin(float a, float p) { return sin(2. * PI * mod(a,1.) + p); }
+float theta(float x) { return clamp(smoothstep(0., 0.01, x),0.,1.); }
+float _sin(float a) { return sin(2. * PI * round(mod(a,1.))); }
+float _sin(float a, float p) { return sin(2. * PI * round(mod(a,1.)) + p); }
 float _unisin(float a,float b) { return (.5*_sin(a) + .5*_sin((1.+b)*a)); }
 float _sq(float a) { return sign(2.*fract(a) - 1.); }
 float _sq(float a,float pwm) { return sign(2.*fract(a) - 1. + pwm); }
@@ -223,7 +224,7 @@ float resolpA24_mix(float time, float f, float tL, float fa, float reso)
 float bitexplosion(float time, float B, int dmaxN, float fvar, float B2amt, float var1, float var2, float var3, float decvar)
 {
     float snd = 0.;
-    float B2 = mod(B,2.);
+    float B2 = round(mod(B,2.));
     float f = 60.*fvar;
 	float dt = var1 * 2.*PI/15. * B/sqrt(10.*var2-.5*var3*B);
     int maxN = 10 + dmaxN;
@@ -248,8 +249,8 @@ float AMAYSYN(float t, float B, float Bon, float Boff, float note, int Bsyn)
 
     float env = theta(B-Bon) * theta(Boff-B);
 	float s = _sin(t*f);
-
-	if(Bsyn == 0){}
+// 	Bsyn = ;
+	if(Bsyn == 0){return 0.;}
     else if(Bsyn == 16){
       s = .5*theta(Bprog)*exp(-15.*Bprog)*((.35*_tri(f*t+0.)+.3*_sin(.5*f*t)+.05*(2.*fract(2.*f*t+0.)-1.)+.35*_tri(f*t+(.01+(.0002*_tri(.5*Bprog+0.))))+.5*_tri(.999*f*t+(.05+(.001*_tri(.33*Bprog+0.)))))
       +(.35*_tri(f*t+0.)+.3*_sin(.5*f*t)+.05*(2.*fract(2.*f*t+0.)-1.)+.35*_tri(f*t+(.01+(.0002*_tri(.5*Bprog+0.))))+.5*_tri(.999*f*t+(.05+(.001*_tri(.33*Bprog+0.))))))
@@ -264,22 +265,22 @@ float AMAYSYN(float t, float B, float Bon, float Boff, float note, int Bsyn)
     else if(Bsyn == 18){
       s = (200.+(300.*clip(4.*(fract(-16.*Bprog+0.)+.5))))*env_ADSR(_t,tL,0.,.2,.2,.5)*resolpA24_mix(_t,f,tL,(200.+.3*f),.3);}
     
-    else if(Bsyn == -1){
-      s = s_atan(vel*smoothstep(0.,.1,_t)*smoothstep(.1+.3,.3,_t)*(clip(10.*_tri((68.5+(106.8-68.5)*smoothstep(-.1, 0.,-_t))*_t))+_sin(.5*(68.5+(106.8-68.5)*smoothstep(-.1, 0.,-_t))*_t)))+1.2*step(_t,.05)*_sin(5000.*_t*.8*_saw(1000.*_t*.8));}
-    else if(Bsyn == -2){
-      s = 3.*s_atan(vel*smoothstep(0.,.015,_t)*smoothstep(.1+.15,.15,_t)*MACESQ(_t,(50.+(200.-50.)*smoothstep(-.12, 0.,-_t)),5.,10,1,.8,1.,1.,1.,.1,.1,0.,1) + .4*.5*step(_t,.03)*_sin(_t*1100.*1.*_saw(_t*800.*1.)) + .4*(1.-exp(-1000.*_t))*exp(-40.*_t)*_sin((400.-200.*_t)*_t*_sin(1.*(50.+(200.-50.)*smoothstep(-.12, 0.,-_t))*_t)));}
-    else if(Bsyn == -3){
-      s = 2.*s_atan(vel*smoothstep(0.,.01,_t)*smoothstep(.3+.1,.1,_t)*MACESQ(_t,(60.+(150.-60.)*smoothstep(-.2, 0.,-_t)),5.,10,1,.8,1.,1.,1.,.1,0.,0.,1) + 1.5*.5*step(_t,.05)*_sin(_t*1100.*5.*_saw(_t*800.*5.)) + 1.5*(1.-exp(-1000.*_t))*exp(-40.*_t)*_sin((400.-200.*_t)*_t*_sin(1.*(60.+(150.-60.)*smoothstep(-.2, 0.,-_t))*_t)));}
-    else if(Bsyn == -4){
-      s = .2*vel*fract(sin(t*100.*.9)*50000.*.9)*doubleslope(_t,.03,.1,.1);}
-    else if(Bsyn == -5){
-      s = vel*bitexplosion(t, Bprog, 1,2.,2.,1.5,2.,1.,1.);}
-    else if(Bsyn == -6){
-      s = .4*(.6+.25*_psq(4.*B,0.))*vel*fract(sin(t*100.*.3)*50000.*2.)*doubleslope(_t,0.,.05,0.);}
-    else if(Bsyn == -7){
-      s = vel*clamp(1.6*_tri(_t*(350.+(6000.-800.)*smoothstep(-.01,0.,-_t)+(800.-350.)*smoothstep(-.01-.01,-.01,-_t)))*smoothstep(-.1,-.01-.01,-_t) + .7*fract(sin(t*90.)*4.5e4)*doubleslope(_t,.05,.3,.3),-1., 1.)*doubleslope(_t,0.,.25,.3);}
+    else if((Bsyn == -1)){
+      s = s_atan(vel*clamp(smoothstep(0.,.1,_t)*smoothstep(.1+.3,.3,_t),0.,1.)*(clip(10.*_tri((68.5+(106.8-68.5)*smoothstep(-.1, 0.,-_t))*_t))+_sin(.5*(68.5+(106.8-68.5)*smoothstep(-.1, 0.,-_t))*_t)))+0.*clamp(1.2*step(_t,.05)*_sin(500000.*_t*.8*_saw(100000.*_t*.8)),0.,1.);}
+    else if((Bsyn == -2)){
+      s = 3.*s_atan(vel*smoothstep(0.,.015,_t)*smoothstep(.1+.15,.15,_t)*MACESQ(_t,(50.+(200.-50.)*smoothstep(-.12, 0.,-_t)),5.,10,1,.8,1.,1.,1.,.1,.1,0.,1) + .4*.5*step(_t,.03)*_sin(_t*1100.*1.*_saw(_t*800.*1.)) + 0.*.4*(1.-exp(-1000.*_t))*exp(-40.*_t)*_sin((400.-200.*_t)*_t*_sin(1.*(50.+(200.-50.)*smoothstep(-.12, 0.,-_t))*_t)));}
+    else if((Bsyn == -3) ){//FIXME
+      s = 2.*s_atan(vel*smoothstep(0.,.01,_t)*smoothstep(.3+.1,.1,_t)*MACESQ(_t,(60.+(150.-60.)*smoothstep(-.2, 0.,-_t)),5.,10,1,.8,1.,1.,1.,.1,0.,0.,1) + 0.*1.5*.5*step(_t,.05)*_sin(_t*1100.*5.*_saw(_t*800.*5.)) + 0.*1.5*(1.-exp(-1000.*_t))*exp(-40.*_t)*_sin((400.-200.*_t)*_t*_sin(1.*(60.+(150.-60.)*smoothstep(-.2, 0.,-_t))*_t)));}
+    else if((Bsyn == -4)){
+      s = .2*vel*fract(sin(_t*100.*.9)*50000.*.9)*doubleslope(_t,.03,.1,.1);}
+    else if((Bsyn == -5)){
+      s = vel*bitexplosion(_t, Bprog, 1,2.,2.,1.5,2.,1.,1.);}
+    else if((Bsyn == -6)){
+      s = .4*(.6+.25*_psq(4.*B,0.))*vel*fract(sin(_t*100.*.3)*50000.*2.)*doubleslope(_t,0.,.05,0.);}
+    else if((Bsyn == -7)){
+      s = vel*clamp(1.6*_tri(_t*(350.+(6000.-800.)*smoothstep(-.01,0.,-_t)+(800.-350.)*smoothstep(-.01-.01,-.01,-_t)))*smoothstep(-.1,-.01-.01,-_t) + .7*fract(sin(_t*90.)*4.5e4)*doubleslope(_t,.05,.3,.3),-1., 1.)*doubleslope(_t,0.,.25,.3);}
     
-	return clamp(env,0.,1.) * s_atan(s);
+	return  s_atan(env*s);
 }
 
 float BA8(float x, int pattern)
@@ -296,6 +297,7 @@ float mainSynth(float time)
     int NO_trks = 4;
     int trk_sep[5] = int[5](0,6,9,21,24);
     int trk_syn[4] = int[4](18,16,19,17);
+    //float trk_norm[4] = float[4](.45,.45,.7,.24);
     float trk_norm[4] = float[4](.45,.45,.7,.24);
     float trk_rel[4] = float[4](.01,.5,0.,0.);
     float mod_on[24] = float[24](0.,4.,8.,12.,16.,20.,0.,4.,8.,0.,2.,4.,6.,8.,10.,12.,14.,16.,18.,20.,22.,12.,16.,20.);
@@ -316,7 +318,7 @@ float mainSynth(float time)
     float d = 0.;
 
     // mod for looping
-    float BT = mod(BPS * time, max_mod_off);
+    float BT = (mod(BPS * time, max_mod_off));
     if(BT > max_mod_off) return r;
     time = SPB * BT;
 
@@ -357,7 +359,7 @@ float mainSynth(float time)
 
                 if(trk_syn[trk] == drum_index)
                 {
-                    int Bdrum = int(mod(note_pitch[ptn_sep[ptn]+_note], drum_synths));
+                    int Bdrum = int(round(mod(note_pitch[ptn_sep[ptn]+_note], drum_synths)));
                     float Bvel = note_vel[(ptn_sep[ptn]+_note)] * pow(2.,mod_transp[trk_sep[trk]+_mod]/6.);
 
                     //0 is for sidechaining - am I doing this right?
@@ -374,8 +376,8 @@ float mainSynth(float time)
             }
         }
     }
-
-    return s_atan(s_atan(r_sidechain * r + d));
+    r_sidechain = 1.;
+    return (s_atan(r_sidechain * r + d));
 //    return sign(snd) * sqrt(abs(snd)); // eine von Matzes "besseren" Ideen
 }
 
@@ -397,13 +399,13 @@ void main()
 //    t = mod(t, 4.5);
     
    // Get the 2 values for left and right channels
-   vec2 y = iVolume * mainSound( t );
+   vec2 y = mainSound( t );
 
    // convert them from -1 to 1 to 0 to 65536
    vec2 v  = floor((0.5+0.5*y)*65536.0);
 
    // separate them into low and high bytes
-   vec2 vl = mod(v,256.0)/255.0;
+   vec2 vl = round(mod(v,256.0))/255.0;
    vec2 vh = floor(v/256.0)/255.0;
 
    // write them out where 
