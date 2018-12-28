@@ -405,7 +405,7 @@ const char *gfx_frag =
    "x*=rot(c.yyx*iTime);"
    "float dz=.5;"
    "vec3 z=vec3(x.xy,mod(x.z,dz)-.5*dz);"
-   "float r=length(x.xy),ddr=.1,dr=mod(r,ddr)-.5*ddr,p=atan(x.y,x.x),ddp=pi/16.,dp=mod(p,2.*ddp)-ddp,r0=.3;"
+   "float r=length(x.xy),ddr=.1,dr=mod(r,ddr)-.5*ddr,p=atan(x.y,x.x),ddp=pi/(8.+round(24.*rand(floor(2.*iTime)*c.xx))),dp=mod(p,2.*ddp)-ddp,r0=.3;"
    "vec3 y=vec3(r0*cos(p-dp),r0*sin(p-dp),0.);"
    "sdf=vec2(length(z-y)-.05,1.+3.*round(rand(vec2(p-dp,x.z-z.z))));"
    "sdf=add(sdf,vec2(stroke(lineseg(z,y,vec3(r0*cos(p-dp+ddp),r0*sin(p-dp+ddp),0.)),.03),1.));"

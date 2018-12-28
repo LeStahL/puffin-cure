@@ -731,7 +731,7 @@ vec2 scene4(vec3 x) // WURSTTUNNEL
         ddr = .1,
         dr = mod(r, ddr)-.5*ddr,
         p = atan(x.y,x.x),
-        ddp = pi/16.,
+        ddp = pi/(8.+round(24.*rand(floor(2.*iTime)*c.xx))),
         dp = mod(p, 2.*ddp)-ddp,
         r0 = .3;
     
