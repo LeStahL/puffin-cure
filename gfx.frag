@@ -711,6 +711,43 @@ vec2 scene3(vec3 x) // UNC triangle scene
     return sdf;
 }
 
+vec2 scene4(vec3 x) // WURSTTUNNEL
+{
+    vec2 sdf = c.xy;
+    
+    x -= c.yyx*iTime;
+    
+    vec3 dv = 2.e-2*vec3(snoise(c.xx*(x.z-iTime)),
+                      snoise(c.xx*(x.z-iTime)+13.),
+                      snoise(c.xx*(x.z-iTime)-22.)
+                      );
+    x += dv;
+    x *= rot(c.yyx*iTime);
+    
+    float dz = .5;
+    vec3 z = vec3(x.xy, mod(x.z, dz)-.5*dz);
+    
+    float r = length(x.xy),
+        ddr = .1,
+        dr = mod(r, ddr)-.5*ddr,
+        p = atan(x.y,x.x),
+        ddp = pi/16.,
+        dp = mod(p, 2.*ddp)-ddp,
+        r0 = .3;
+    
+    vec3 y = vec3(r0*cos(p-dp), r0*sin(p-dp), 0.);
+    sdf = vec2(length(z-y)-.05, 1.+3.*round(rand(vec2(p-dp,x.z-z.z))));
+    
+    sdf = add(sdf, vec2(stroke(lineseg(z, y, vec3(r0*cos(p-dp+ddp), r0*sin(p-dp+ddp), 0.)), .03),1.));
+	sdf = add(sdf, vec2(stroke(lineseg(z, y, vec3(r0*cos(p-dp-ddp), r0*sin(p-dp-ddp), 0.)), .03),1.));
+
+    sdf = add(sdf, vec2(stroke(lineseg(z, y, y+dz*c.yyx), .03), 1.+3.*round(rand(vec2(p-dp+17.)))));
+	sdf = add(sdf, vec2(stroke(lineseg(z, y, y-dz*c.yyx), .03), 1.+3.*round(rand(vec2(p-dp+17.)))));
+    
+    sdf.x -= length(dv)-.03;
+    
+    return sdf;
+}
 //performs raymarching
 //scene: name of the scene function
 //xc: 	 name of the coordinate variable
@@ -1392,6 +1429,39 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         sdf = add(sdf, vec4(dc, c.xxy));
         
         col = sdf.gba * smoothstep(1.5/iResolution.y, -1.5/iResolution.y, sdf.x) * blend(102., 106., 1.);        
+    }
+    
+    // Tunnel scene
+    else if(iTime < 127.)
+    {
+        vec3 ro, r, u, t, x, dir;
+        vec2 s;
+    	camerasetup(camera2, ro, r, u, t, uv, dir);
+    	
+        // Graph traversal
+        float d = .2/length(dir.xy);
+        {
+            bool hit;
+            
+            raymarch(scene4, x, ro, d, dir, s, 150, 1.e-4, hit);
+            if(hit == false || x.y > 12.)
+            {
+                // Draw Background here.
+                col = background1(uv) * blend(108., 126., 1.);
+                
+                post(col, uv);
+                fragColor = vec4(col, 1.);
+                return;
+            }
+            
+            vec3 n;
+            calcnormal(scene4, n, 5.e-3, x);
+
+            vec3 l = x+2.*c.yyx, re = normalize(reflect(-l,n)), v = normalize(x-ro);
+            float rev = abs(dot(re,v)), ln = abs(dot(l,n));
+
+            col = color(rev, ln, s.y, uv, x) * blend(108., 126., 1.);
+        }
     }
     
     // Post-process
