@@ -981,7 +981,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             int str[14] = int[14](72, 101, 108, 108, 111, 32, 85, 78, 67, 32, 50, 48, 49, 56);
             for(int i=0; i<14; ++i)
             {
-                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                if( (abs(uv.x) < 1.5) && (abs(uv.y-vn.y) < .1) )
                 {
                     vec2 bound = uv-carriage-vn+.05*c.yx;
                     d = min(d, dglyph(bound, str[i]));
@@ -1034,7 +1034,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             int str[17] = int[17](81, 77, 46, 32, 78, 82, 52, 46, 32, 84, 101, 97, 109, 50, 49, 48, 46);
             for(int i=0; i<17; ++i)
             {
-                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                if( (abs(uv.x) < 1.5) && (abs(uv.y-vn.y) < .1) )
                 {
                     vec2 bound = uv-carriage-vn+.05*c.yx;
                     d = min(d, dglyph(bound, str[i]));
@@ -1261,7 +1261,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             int str[18] = int[18](72, 97, 112, 112, 121, 32, 50, 48, 49, 57, 32, 116, 111, 32, 121, 111, 117, 33);
             for(int i=0; i<18; ++i)
             {
-                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                if( (abs(uv.x) < 1.5) && (abs(uv.y-vn.y) < .1) )
                 {
                     vec2 bound = uv-carriage-vn+.05*c.yx;
                     d = min(d, dglyph(bound, str[i]));
@@ -1341,7 +1341,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             int str[20] = int[20](83, 101, 101, 32, 121, 111, 117, 32, 97, 116, 32, 82, 101, 118, 105, 115, 105, 111, 110, 46);
             for(int i=0; i<20; ++i)
             {
-                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                if( (abs(uv.x) < 1.5) && (abs(uv.y-vn.y) < .1) )
                 {
                     vec2 bound = uv-carriage-vn+.05*c.yx;
                     d = min(d, dglyph(bound, str[i]));
@@ -1368,14 +1368,14 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         
         vec2 vn = 1.e-2*vec2(snoise(1.36*uv-.66*vec2(1.5,2.4)*iTime), snoise(1.35*uv-.4*vec2(1.2,2.1)*iTime));
         
-        // "See you at Revision."
+        // "www.z10.info."
         {
             size = 1.34;
             carriage = -.45*c.xy;
             int str[22] = int[22](84, 101, 97, 109, 50, 49, 48, 46, 32, 119, 119, 119, 46, 122, 49, 48, 46, 105, 110, 102, 111, 32);
             for(int i=0; i<22; ++i)
             {
-                if( (abs(uv.x) < 1.5) && (abs(uv.y) < .1) )
+                if( (abs(uv.x) < 1.5) && (abs(uv.y-vn.y) < .1) )
                 {
                     vec2 bound = uv-carriage-vn+.05*c.yx;
                     d = min(d, dglyph(bound, str[i]));
