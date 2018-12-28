@@ -338,9 +338,18 @@ int WINAPI demo(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, in
     HGLRC glrc = wglCreateContext(hdc);
     wglMakeCurrent (hdc, glrc);
     
-    // Draw black screen
+    // Draw black screen with loading bar
     glClearColor(0.,0.,0.,1.);
     glClear(GL_COLOR_BUFFER_BIT);
+    
+    glColor3f(.2, .2, .2);
+    glBegin(GL_QUADS);            
+    glVertex2f(-.5f, -.05f);
+    glVertex2f(-.5f, .05f);
+    glVertex2f(.5f, .05f);
+    glVertex2f(.5f, -0.05f);
+    glEnd();
+    
     SwapBuffers(hdc);
     
     // OpenGL extensions
@@ -509,6 +518,27 @@ int main(int argc, char **args)
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     
+    glClearColor(0.,0.,0.,1.);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glColor3f(.2, .2, .2);
+    glBegin(GL_QUADS);            
+    glVertex2f(-.5f, -.05f);
+    glVertex2f(-.5f, .05f);
+    glVertex2f(.5f, .05f);
+    glVertex2f(.5f, -0.05f);
+    glEnd();
+    
+    glColor3f(1., 1., 1.);
+    glBegin(GL_QUADS);            
+    glVertex2f(-.5f, -.05f);
+    glVertex2f(-.5f, .05f);
+    glVertex2f(0.f, .05f);
+    glVertex2f(0.f, -0.05f);
+    glEnd();
+    
+    SwapBuffers(hdc);
+    
     // Load gfx shader
 #undef VAR_IRESOLUTION
 #undef VAR_ITIME
@@ -551,6 +581,19 @@ int main(int argc, char **args)
     
     glUseProgram(gfx_program);
     glViewport(0, 0, w, h);
+    
+    glClearColor(0.,0.,0.,1.);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glColor3f(1., 1., 1.);
+    glBegin(GL_QUADS);            
+    glVertex2f(-.5f, -.05f);
+    glVertex2f(-.5f, .05f);
+    glVertex2f(0.5f, .05f);
+    glVertex2f(0.5f, -0.05f);
+    glEnd();
+    
+    SwapBuffers(hdc);
     
     // Initialize font texture
     printf("font texture width is: %d\n", font_texture_size); // TODO: remove
