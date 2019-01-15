@@ -126,8 +126,8 @@ void debug(int shader_handle)
 //TODO: use full hd again
 // Graphics shader globals
 // int w = 1366, h = 768,
-// int w = 800, h = 450,
-int w = 1920, h = 1080,
+int w = 800, h = 450,
+// int w = 1920, h = 1080,
     gfx_handle, gfx_program, 
     time_location, resolution_location, 
     font_texture_location, font_width_location,
@@ -479,7 +479,7 @@ int main(int argc, char **args)
     unsigned int snd_texture;
     glGenTextures(1, &snd_texture);
     glBindTexture(GL_TEXTURE_2D, snd_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, texs, texs, 0, GL_RGBA, GL_BYTE, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, texs, texs, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -508,10 +508,14 @@ int main(int argc, char **args)
 
         glFlush();
 
-        glReadPixels(0, 0, texs, texs, GL_RGBA, GL_BYTE, smusic1+i*block_size);
+        glReadPixels(0, 0, texs, texs, GL_RGBA, GL_UNSIGNED_BYTE, smusic1+i*block_size);
         
         printf("Block: %d/%d\n", i, nblocks1);
     }
+    
+    FILE *f = fopen("SOUND", "wb");
+    fwrite(smusic1, 1, 4*nblocks1*block_size, f);
+    fclose(f);
     
     // Reset everything for rendering gfx again
     glViewport(0, 0, w, h);
