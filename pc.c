@@ -479,7 +479,7 @@ int main(int argc, char **args)
     unsigned int snd_texture;
     glGenTextures(1, &snd_texture);
     glBindTexture(GL_TEXTURE_2D, snd_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, texs, texs, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA8UI, texs, texs, 0, GL_RGBA8UI, GL_UNSIGNED_BYTE, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -491,7 +491,7 @@ int main(int argc, char **args)
     printf("nblocks: %d\n", nblocks1);
     for(int i=0; i<nblocks1; ++i)
     {
-        double tstart = (double)(i*block_size)/(double)sample_rate;
+        double tstart = (double)(i)*(double)block_size/(double)sample_rate;
         
         glViewport(0,0,texs,texs);
         
@@ -508,7 +508,7 @@ int main(int argc, char **args)
 
         glFlush();
 
-        glReadPixels(0, 0, texs, texs, GL_RGBA, GL_UNSIGNED_BYTE, smusic1+i*block_size);
+        glReadPixels(0, 0, texs, texs, GL_RGBA8UI, GL_UNSIGNED_BYTE, smusic1+i*block_size);
         
         printf("Block: %d/%d\n", i, nblocks1);
     }
