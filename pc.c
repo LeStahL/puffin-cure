@@ -27,6 +27,7 @@ int _fltused = 0;
 #define VC_EXTRALEAN
 #include <windows.h>
 #include <mmsystem.h>
+#include <Mmreg.h>
 
 #include <GL/gl.h>
 #include "glext.h"
@@ -133,6 +134,7 @@ int w = 800, h = 450,
     font_texture_location, font_width_location,
     sfx_program, sfx_blockoffset_location, 
     sfx_samplerate_location, sfx_volumelocation, 
+    sfx_texs_location,
     scale_location, nbeats_location;
     
 // Demo globals
@@ -452,6 +454,9 @@ int main(int argc, char **args)
 #ifndef VAR_IBLOCKOFFSET
     #define VAR_IBLOCKOFFSET "iBlockOffset"
 #endif
+#ifndef VAR_ITEXS
+    #define VAR_ITEXS "iTexS"
+#endif
     int sfx_size = strlen(sfx_frag),
         sfx_handle = glCreateShader(GL_FRAGMENT_SHADER);
     sfx_program = glCreateProgram();
@@ -465,6 +470,7 @@ int main(int argc, char **args)
     sfx_samplerate_location = glGetUniformLocation(sfx_program, VAR_ISAMPLERATE);
     sfx_blockoffset_location = glGetUniformLocation(sfx_program, VAR_IBLOCKOFFSET);
     sfx_volumelocation = glGetUniformLocation(sfx_program, VAR_IVOLUME);
+    sfx_texs_location = glGetUniformLocation(sfx_program, VAR_ITEXS);
     
     int nblocks1 = sample_rate*duration1/block_size+1;
     music1_size = nblocks1*block_size; 
@@ -491,13 +497,14 @@ int main(int argc, char **args)
     printf("nblocks: %d\n", nblocks1);
     for(int i=0; i<nblocks1; ++i)
     {
-        double tstart = (double)(i*block_size)/(double)sample_rate;
+        double tstart = (double)(i*block_size);
         
         glViewport(0,0,texs,texs);
         
         glUniform1f(sfx_volumelocation, 1.);
         glUniform1f(sfx_samplerate_location, (float)sample_rate);
         glUniform1f(sfx_blockoffset_location, (float)tstart);
+        glUniform1i(sfx_texs_location, texs);
         
         glBegin(GL_QUADS);
         glVertex3f(-1,-1,0);
@@ -509,8 +516,18 @@ int main(int argc, char **args)
         glFlush();
 
         glReadPixels(0, 0, texs, texs, GL_RGBA, GL_UNSIGNED_BYTE, smusic1+i*block_size);
-        
+                
         printf("Block: %d/%d\n", i, nblocks1);
+    }
+    glFlush();
+    
+    unsigned short *buf = (unsigned short*)smusic1;
+    short *dest = (short*)smusic1;
+    for(int j=0; j<2*nblocks1*block_size; ++j)
+    {
+        dest[j] = (buf[j]-(1<<15));
+//         buf[j] -= (1<<15);
+//         buf[j] /= (1<<15);
     }
     
     FILE *f = fopen("SOUND", "wb");
